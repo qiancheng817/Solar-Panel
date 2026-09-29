@@ -118,6 +118,38 @@ const API_BASE = '/api/';
   若仍有卡片图标未显示，静默重取一次数据并**只替换图标位**（不重建 DOM），
   兜住任何原因导致的未内联
 
+#### 性能修复：内联导致首屏变慢（App 黑屏）
+
+**现象**：内联上线后，App 中从别的应用切回时先黑屏再出内容；
+而内联之前虽然图标有延迟，但从不黑屏。
+
+**根因**：内联把图标从「页面渲染之后再加载」挪到了「页面渲染之前必须拿到」，
+等于把「图标慢」换成了「整页慢」——页面结构被一起推迟，期间露出
+WebView 底色（App 的 `app_background`，系统深色下为 `#12161A`）形成黑屏。
+
+具体开销有三处：
+
+1. **每次 public 请求都重新读盘 + base64 编码**（无缓存），30+ 卡片即 30+ 次 I/O
+2. **静态资源完全没有缓存头**：CSS/JS 经 `c.Data()` 直出，无 ETag/Last-Modified，
+   每次重载都全量下载（仅 CSS 就约 150 KB）
+3. **public 接口原本是 `no-store`**，切回时一律重新拉取完整响应
+
+**修复**：
+
+| 位置 | 改动 |
+|---|---|
+| `icon_inline.go` | 新增 `iconURICache`：按「路径 + 修改时间 + 大小」缓存 data URI，命中后零 I/O 零编码 |
+| `icon_inline.go` | `warmInlineCache()`：启动时预计算全部本地图标，首次请求即命中缓存 |
+| `public_handler.go` | 新增 `iconInlineBudget`（512 KB）总量上限，超出回退同源 URL |
+| `public_handler.go` | `Cache-Control` 改为 `private, max-age=60, stale-while-revalidate=600` |
+| `main.go` | 带 `?v=` 版本参数的静态资源长缓存（immutable）；HTML 保持 `no-cache` |
+
+`stale-while-revalidate` 是关键：缓存过期后仍**先用旧内容立即渲染**，
+再后台静默更新，因此从别的应用切回时始终「直接显示已有内容」，不会空白。
+
+> 前端 `fetch` 未设置 `cache: 'no-store'`（默认 `default`），遵循 HTTP 缓存头，
+> 上述后端缓存策略可正常生效。
+
 ### web 版（PHP）说明
 
 内联目前**只在 Docker / Go 版实现**。PHP 版 `public.php` 未改动，

@@ -38,6 +38,9 @@ import (
 
 const (
 	iconInlineMaxBytes = 256 * 1024
+	// iconInlineBudget 单次 public 响应允许内联的 data URI 总字节上限，
+	// 超出部分回退为同源 URL，避免响应体无限膨胀拖慢首屏。
+	iconInlineBudget   = 512 * 1024
 	iconCacheDirName   = "iconcache"
 	iconFetchTimeout   = 10 * time.Second
 	iconFetchMaxBytes  = 4 * 1024 * 1024
@@ -52,6 +55,73 @@ var iconExtCandidates = []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico
 
 func iconCacheDir(cfg *config.Config) string {
 	return filepath.Join(cfg.UploadDir, iconCacheDirName)
+}
+
+/* ------------------------------------------------------------
+   data URI 内存缓存（v2.1.16 性能修复）
+   早期版本每次 public 请求都要对每个卡片「读磁盘 + base64 编码」，
+   卡片多时服务端耗时可达数百毫秒，页面迟迟拿不到数据，
+   期间露出 WebView 底色 —— 表现为 App 先黑屏再出内容。
+   这里按「路径 + 修改时间 + 大小」缓存编码结果，命中后零 I/O、零编码。
+   ------------------------------------------------------------ */
+type iconURIEntry struct {
+	uri     string
+	size    int64
+	modTime time.Time
+}
+
+var iconURICache sync.Map // 绝对/缓存路径 -> *iconURIEntry
+
+// cachedDataURI 带缓存地生成 data URI；文件变化时自动失效
+func cachedDataURI(p string) string {
+	if p == "" {
+		return ""
+	}
+	st, err := os.Stat(p)
+	if err != nil || st.Size() == 0 || st.Size() > iconInlineMaxBytes {
+		return ""
+	}
+	if v, ok := iconURICache.Load(p); ok {
+		e, _ := v.(*iconURIEntry)
+		if e != nil && e.size == st.Size() && e.modTime.Equal(st.ModTime()) {
+			return e.uri
+		}
+	}
+	uri := cachedDataURI(p)
+	if uri != "" {
+		iconURICache.Store(p, &iconURIEntry{
+			uri:     uri,
+			size:    st.Size(),
+			modTime: st.ModTime(),
+		})
+	}
+	return uri
+}
+
+// warmInlineCache 预计算本地图标的 data URI，让首次 public 请求就命中缓存
+func warmInlineCache(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	var items []model.Item
+	if err := db.DB.Find(&items).Error; err != nil {
+		return
+	}
+	for _, it := range items {
+		if p := resolveIconAbsPath(cfg, it.IconValue); p != "" {
+			cachedDataURI(p)
+		}
+		// favicon 型：预热后端已有的 favicon 本地缓存
+		if it.IconType == "favicon" && it.URL != "" {
+			if host := hostOfURL(it.URL); host != "" {
+				if cached := checkFaviconCache(cfg, host); cached != "" {
+					if p := resolveIconAbsPath(cfg, cached); p != "" {
+						cachedDataURI(p)
+					}
+				}
+			}
+		}
+	}
 }
 
 // 说明：图片类型判定复用 items_handler.go 中已有的 detectImageExt
@@ -212,7 +282,7 @@ func IconInlineData(cfg *config.Config, iconType, iconValue, itemURL string) str
 
 	// 1) 本地图标：直接内联
 	if p := resolveIconAbsPath(cfg, v); p != "" {
-		if d := readImageFile(p); d != "" {
+		if d := cachedDataURI(p); d != "" {
 			return d
 		}
 	}
@@ -220,7 +290,7 @@ func IconInlineData(cfg *config.Config, iconType, iconValue, itemURL string) str
 	// 2) 远程图标：命中服务端缓存则内联，否则后台拉取（下次生效）
 	if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
 		if p := iconCachePathFor(cfg, v); p != "" {
-			if d := readImageFile(p); d != "" {
+			if d := cachedDataURI(p); d != "" {
 				return d
 			}
 			// 缓存内容损坏（非图片）→ 删除并允许重新拉取
@@ -236,7 +306,7 @@ func IconInlineData(cfg *config.Config, iconType, iconValue, itemURL string) str
 		if host := hostOfURL(itemURL); host != "" {
 			if cached := checkFaviconCache(cfg, host); cached != "" {
 				if p := resolveIconAbsPath(cfg, cached); p != "" {
-					if d := readImageFile(p); d != "" {
+					if d := cachedDataURI(p); d != "" {
 						return d
 					}
 				}
@@ -258,6 +328,9 @@ func WarmupIcons(cfg *config.Config) {
 				log.Println("[icon] 预热异常:", r)
 			}
 		}()
+		// 先预计算本地图标的 data URI，让首次 public 请求就命中内存缓存（零读盘、零编码）
+		warmInlineCache(cfg)
+
 		var items []model.Item
 		if err := db.DB.Where("icon_type = ?", "image").Find(&items).Error; err != nil {
 			return

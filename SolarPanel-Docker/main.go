@@ -303,6 +303,12 @@ func main() {
 			c.JSON(404, gin.H{"code": 1, "msg": "not found"})
 			return
 		}
+		// HTML 必须每次校验（换新版本后能立即生效）；其余（favicon 等）可长缓存
+		if strings.HasSuffix(embedPath, ".html") {
+			c.Header("Cache-Control", "no-cache")
+		} else {
+			c.Header("Cache-Control", "public, max-age=86400")
+		}
 		if contentType != "" {
 			c.Data(http.StatusOK, contentType, data)
 			return
@@ -393,6 +399,13 @@ func main() {
 		data, err := frontendFS.ReadFile(embedPath)
 		if err == nil {
 			ct := contentTypeByExt(cleanPath)
+			// 页面引用都带 ?v=<版本> 参数，内容变则版本号变，可安全长缓存；
+			// 无版本参数的裸地址一律每次校验，便于调试与刷新。
+			if c.Request.URL.Query().Get("v") != "" {
+				c.Header("Cache-Control", "public, max-age=31536000, immutable")
+			} else {
+				c.Header("Cache-Control", "no-cache")
+			}
 			c.Data(http.StatusOK, ct, data)
 			return
 		}

@@ -25,7 +25,12 @@ type GroupWithItems struct {
 }
 
 func (h *PublicHandler) Public(c *gin.Context) {
-	c.Header("Cache-Control", "no-store, max-age=0")
+	// v2.1.16：允许浏览器/WebView 短暂复用（private = 不进任何共享代理）。
+	// 从别的应用切回时若仍在有效期内，取缓存零往返，页面直接呈现已有内容，
+	// 避免重新拉取（含内联图标的大响应）期间露出 WebView 底色形成黑屏。
+	// max-age 内直接取缓存；超出后先用陈旧缓存立即渲染，再后台静默更新，
+	// 因此从别的应用切回时始终「直接显示已有内容」，不会因等待响应而空白。
+	c.Header("Cache-Control", "private, max-age=60, stale-while-revalidate=600")
 	var settingsRows []model.Setting
 	if err := db.DB.Find(&settingsRows).Error; err != nil {
 		Fail(c, http.StatusInternalServerError, "读取设置失败")
@@ -94,14 +99,22 @@ func (h *PublicHandler) Public(c *gin.Context) {
 	}
 
 	grouped := make([]GroupWithItems, 0, len(groups))
+	inlineUsed := 0
 	for _, g := range groups {
 		gw := GroupWithItems{ItemGroup: g, Items: []model.Item{}}
 		for _, it := range items {
 			if it.GroupID != g.ID {
 				continue
 			}
-			// v3.0：内联卡片图标，前端拿到数据即可直接渲染，无需再发图片请求
-			it.IconData = IconInlineData(h.cfg, it.IconType, it.IconValue, it.URL)
+			// 内联卡片图标，前端拿到数据即可直接渲染，无需再发图片请求。
+			// 预算保护：累计超过上限后不再内联，超出的卡片回退为同源 URL
+			// （uploads 已带长缓存头，浏览器缓存后同样很快）。
+			if inlineUsed < iconInlineBudget {
+				if d := IconInlineData(h.cfg, it.IconType, it.IconValue, it.URL); d != "" {
+					inlineUsed += len(d)
+					it.IconData = d
+				}
+			}
 			gw.Items = append(gw.Items, it)
 		}
 		grouped = append(grouped, gw)
