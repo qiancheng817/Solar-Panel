@@ -50,46 +50,12 @@ var iconFetchGuard sync.Map
 
 var iconExtCandidates = []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg"}
 
-var iconCTExt = map[string]string{
-	"image/png":                ".png",
-	"image/jpeg":               ".jpg",
-	"image/jpg":                ".jpg",
-	"image/gif":                ".gif",
-	"image/webp":               ".webp",
-	"image/bmp":                ".bmp",
-	"image/x-icon":             ".ico",
-	"image/vnd.microsoft.icon": ".ico",
-	"image/svg+xml":            ".svg",
-}
-
 func iconCacheDir(cfg *config.Config) string {
 	return filepath.Join(cfg.UploadDir, iconCacheDirName)
 }
 
-// looksLikeSVG SVG 是文本，无法用魔数识别，做前缀判断
-func looksLikeSVG(b []byte) bool {
-	n := len(b)
-	if n > 512 {
-		n = 512
-	}
-	s := strings.ToLower(strings.TrimSpace(string(b[:n])))
-	return strings.HasPrefix(s, "<?xml") || strings.HasPrefix(s, "<svg")
-}
-
-// detectImageExt 依据实际内容判定图片扩展名，非图片返回空
-func detectImageExt(b []byte) string {
-	if len(b) == 0 {
-		return ""
-	}
-	if looksLikeSVG(b) {
-		return ".svg"
-	}
-	ct := http.DetectContentType(b)
-	if i := strings.Index(ct, ";"); i >= 0 {
-		ct = strings.TrimSpace(ct[:i])
-	}
-	return iconCTExt[ct]
-}
+// 说明：图片类型判定复用 items_handler.go 中已有的 detectImageExt
+// （magic byte 实测，覆盖 PNG/JPEG/GIF/ICO/WebP/SVG），此处不再重复实现。
 
 // resolveIconAbsPath 把前端使用的图标路径映射为服务器磁盘绝对路径
 func resolveIconAbsPath(cfg *config.Config, iconValue string) string {
