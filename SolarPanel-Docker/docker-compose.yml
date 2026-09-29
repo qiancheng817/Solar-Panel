@@ -1,6 +1,8 @@
 services:
   solarpanel:
-    image: ovitor/solarpanel:latest
+    # 本仓库 GitHub Actions 构建的镜像（v2.1.16 + 应用图标即时加载优化）
+    # 如需回退官方原版，改为：image: ovitor/solarpanel:latest
+    image: ghcr.io/qiancheng817/solar-panel:2.1.16
     container_name: solarpanel
     restart: unless-stopped
     ports:
