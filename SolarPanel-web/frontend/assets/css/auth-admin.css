@@ -1025,3 +1025,156 @@ tr.drag-over-bottom td {
   font-weight: 500;
 }
 .td-revoke { white-space: nowrap; }
+
+/* ================= 分组图标选择器 ================= */
+/* 后台按钮文字：任何屏幕尺寸下均保持一行完整显示 */
+.btn { white-space: nowrap; }
+
+/* 窄屏：表格操作按钮组允许换行，宁可变高也不挤压文字 */
+@media (max-width: 1100px) {
+  .table .actions { flex-wrap: wrap; justify-content: flex-end; }
+}
+
+/* 分组名称行：图标选择按钮 + 名称输入框 */
+.g-name-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.g-name-row .input { flex: 1; min-width: 0; }
+.g-icon-pick {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 21px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  background: var(--surface);
+  border: 1px solid var(--line, rgba(127,127,127,0.18));
+  box-shadow: var(--raised-sm);
+  transition: box-shadow 260ms var(--ease), border-color 260ms var(--ease);
+}
+.g-icon-pick:hover {
+  border-color: var(--accent);
+}
+.g-icon-pick .g-icon-placeholder {
+  font-size: 15px;
+  opacity: 0.45;
+}
+
+/* 分组管理列表名称列：图标 + 名称 */
+.g-table-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.g-table-name .g-table-icon {
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* 图标选择弹窗（宽度为常规弹窗的两倍，内容一屏展开） */
+#groupIconModal .modal-box {
+  max-width: min(1040px, 96vw);
+  max-height: 94vh;
+  overflow-y: auto;
+  scrollbar-width: none;          /* Firefox：不显示滚动条 */
+}
+#groupIconModal .modal-box::-webkit-scrollbar {
+  display: none;                  /* WebKit：不显示滚动条 */
+}
+.gic-search {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+/* 分类内容区 */
+#gicBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gic-cat-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.gic-cat-bar {
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.gic-cat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  gap: 6px;
+}
+
+/* 图标按钮：上图下文，紧凑单行 */
+.gic-item {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 6px 2px 5px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  cursor: pointer;
+  background: var(--surface);
+  border: 1px solid transparent;
+  transition: background 260ms var(--ease), border-color 260ms var(--ease), transform 260ms var(--ease);
+}
+.gic-emoji {
+  font-size: 18px;
+  line-height: 1;
+}
+.gic-name {
+  max-width: 100%;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gic-item:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+.gic-item.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.gic-item.active .gic-name { color: var(--accent); }
+.gic-empty {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 24px 0;
+}
+
+/* 小屏：弹窗贴近全宽，格子进一步收窄 */
+@media (max-width: 480px) {
+  #groupIconModal .modal-box { max-width: 96vw; }
+  .gic-cat-grid {
+    grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+    gap: 5px;
+  }
+  .gic-emoji { font-size: 17px; }
+  .gic-name { font-size: 10.5px; }
+}

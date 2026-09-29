@@ -76,6 +76,32 @@ function ensure_group_visible_column(): void
 }
 
 /**
+ * 分组图标：item_groups 若无 icon 字段则自动补齐（ALTER TABLE）
+ * 存预设图标库中的图标标识（小写字母/数字/连字符，≤64），空串=未设图标。
+ * 每请求仅检测一次；表不存在（未安装）等情况静默跳过。
+ */
+function ensure_group_icon_column(): void
+{
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    try {
+        $st = db()->prepare(
+            "SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'item_groups' AND COLUMN_NAME = 'icon'"
+        );
+        $st->execute();
+        if ((int)$st->fetchColumn() === 0) {
+            db()->exec(
+                "ALTER TABLE `item_groups` ADD COLUMN `icon` VARCHAR(64) NOT NULL DEFAULT '' AFTER `title`"
+            );
+        }
+    } catch (Throwable $e) {
+        // 静默跳过
+    }
+}
+
+/**
  * items / item_groups 的 user_id 字段：仅备份导入的 INSERT 显式引用，
  * 旧库（手工精简建表）若无则自动补齐（ALTER TABLE），与 role / is_visible 同模式。
  * 每请求仅检测一次；表不存在（未安装）等情况静默跳过。

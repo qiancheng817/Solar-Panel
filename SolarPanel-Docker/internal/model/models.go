@@ -22,6 +22,8 @@ func (User) TableName() string { return "users" }
 type ItemGroup struct {
 	ID          uint      `gorm:"primaryKey;autoIncrement" json:"id"`
 	Title       string    `gorm:"size:50;not null" json:"title"`
+	// Icon 分组图标（v2.1.16 新增的可视化图标选择器写入，emoji 文本，限长 8）
+	Icon        string    `gorm:"size:8;not null;default:''" json:"icon"`
 	Description string    `gorm:"size:1000;not null;default:''" json:"description"`
 	Sort        int       `gorm:"not null;default:0" json:"sort"`
 	IsVisible   int       `gorm:"not null;default:1" json:"is_visible"`

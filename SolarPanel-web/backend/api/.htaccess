@@ -1,0 +1,11 @@
+# 备份导入需要上传较大的 JSON 文件（含图标/壁纸 base64）
+# 仅 mod_php 环境生效（php8 / php7 模块名不同，两段都写）
+# FPM / CGI 环境请用同目录 .user.ini
+<IfModule mod_php.c>
+  php_value upload_max_filesize 300M
+  php_value post_max_size 300M
+</IfModule>
+<IfModule mod_php7.c>
+  php_value upload_max_filesize 300M
+  php_value post_max_size 300M
+</IfModule>

@@ -2,7 +2,7 @@
 /**
  * 分组管理（需登录）
  * GET  ?action=list    分组列表（含卡片数）
- * POST action=edit     新增/编辑 {id?, title, description}
+ * POST action=edit     新增/编辑 {id?, title, icon, description}
  * POST action=delete   删除（连同组内卡片）{id}
  * POST action=sort     上移/下移 {id, direction: up|down}
  * POST action=visible  前端显示/隐藏 {id, visible: 0|1}
@@ -14,6 +14,7 @@ require_once __DIR__ . '/../lib/sort.php';
 $u = require_login();
 $pdo = db();
 ensure_group_visible_column();
+ensure_group_icon_column();
 $action = str_param('action', 'list');
 
 // 写操作需要管理员或编辑者（viewer 只读）
@@ -50,16 +51,18 @@ if ($action === 'edit') {
     $title = str_param('title');
     if ($title === '') fail('分组名称不能为空');
     if (mb_strlen($title) > 50) fail('分组名称过长');
+    // 图标：预设图标库的 emoji 字符；去尖括号防注入，最多 8 字符
+    $icon = mb_substr(str_replace(['<', '>'], '', str_param('icon')), 0, 8);
     $desc = mb_substr(str_param('description'), 0, 1000);
 
     if ($id > 0) {
-        $st = $pdo->prepare('UPDATE item_groups SET title = ?, description = ? WHERE id = ?');
-        $st->execute([$title, $desc, $id]);
+        $st = $pdo->prepare('UPDATE item_groups SET title = ?, icon = ?, description = ? WHERE id = ?');
+        $st->execute([$title, $icon, $desc, $id]);
         ok(['id' => $id]);
     }
     $max = (int)$pdo->query('SELECT COALESCE(MAX(sort), -1) FROM item_groups')->fetchColumn();
-    $st = $pdo->prepare('INSERT INTO item_groups (title, description, sort) VALUES (?, ?, ?)');
-    $st->execute([$title, $desc, $max + 1]);
+    $st = $pdo->prepare('INSERT INTO item_groups (title, icon, description, sort) VALUES (?, ?, ?, ?)');
+    $st->execute([$title, $icon, $desc, $max + 1]);
     ok(['id' => (int)$pdo->lastInsertId()]);
 }
 

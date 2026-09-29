@@ -30,8 +30,9 @@ const BACKUP_APP_VERSION = 'v1.0.001';
 require_roles('admin');
 
 $pdo = db();
-// 旧库自动迁移：导入 INSERT 显式引用 is_visible / user_id，先确保列存在（缺失则 ALTER 补齐）
+// 旧库自动迁移：导入 INSERT 显式引用 is_visible / user_id / icon，先确保列存在（缺失则 ALTER 补齐）
 ensure_group_visible_column();
+ensure_group_icon_column();
 ensure_user_id_columns();
 $action = str_param('action', '');
 
@@ -93,7 +94,7 @@ if ($action === 'export') {
 
     // 显式列名导出（不用 SELECT *：避免未来加列后备份结构漂移，created_at 等运行时元数据不入库备份）
     $settings = $pdo->query('SELECT config_name, config_value FROM settings ORDER BY id ASC')->fetchAll();
-    $groups   = $pdo->query('SELECT id, title, description, sort, is_visible, user_id FROM item_groups ORDER BY id ASC')->fetchAll();
+    $groups   = $pdo->query('SELECT id, title, icon, description, sort, is_visible, user_id FROM item_groups ORDER BY id ASC')->fetchAll();
     $items    = $pdo->query('SELECT id, group_id, title, url, lan_url, description, icon_type, icon_value, icon_bg, open_method, sort, user_id FROM items ORDER BY id ASC')->fetchAll();
 
     $filename = 'solarpanel-backup-' . date('Ymd-His') . '.json';
@@ -246,16 +247,19 @@ if ($action === 'import') {
         }
 
         // 分组（保留原 id，卡片 group_id 引用才一致；is_visible 控制前端显隐，必须还原）
-        $stG = $pdo->prepare('INSERT INTO item_groups (id, title, description, sort, is_visible, user_id) VALUES (?, ?, ?, ?, ?, ?)');
+        $stG = $pdo->prepare('INSERT INTO item_groups (id, title, icon, description, sort, is_visible, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
         $groupIds = [];
         $cntGroups = 0;
         foreach ($groups as $g) {
             if (!is_array($g) || !isset($g['id'], $g['title'])) continue;
             $vis = isset($g['is_visible']) ? (int)$g['is_visible'] : 1;
             if ($vis !== 0 && $vis !== 1) $vis = 1;
+            // 图标清洗与 groups.php 保持一致：去尖括号，最多 8 字符
+            $gIcon = mb_substr(str_replace(['<', '>'], '', trim((string)($g['icon'] ?? ''))), 0, 8);
             $stG->execute([
                 (int)$g['id'],
                 mb_substr((string)$g['title'], 0, 50),
+                $gIcon,
                 mb_substr((string)($g['description'] ?? ''), 0, 1000),
                 (int)($g['sort'] ?? 0),
                 $vis,

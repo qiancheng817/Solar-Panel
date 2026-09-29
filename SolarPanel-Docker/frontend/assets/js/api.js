@@ -3,8 +3,17 @@
  */
 
 /* ================= 应用版本与更新日志（每次更新只需改这里） ================= */
-const APP_VERSION = 'v2.1.13';
+const APP_VERSION = 'v2.1.16';
 const APP_CHANGELOG = [
+  { ver: 'v2.1.16', date: '2026-09-27', items: [
+    '🗂️ 分组支持图标可视化选择：预设图标库按 9 大功能分类、可搜索、实时预览，图标在管理列表与前端主页同步显示',
+  ]},
+  { ver: 'v2.1.15', date: '2026-09-21', items: [
+    '🔒 表单类弹窗禁用点击空白关闭（防止移动端滑动误触）；轻量类弹窗（确认/帮助/更新日志）保留',
+  ]},
+  { ver: 'v2.1.14', date: '2026-09-20', items: [
+    '⚡ 修复主题 FOUC 闪烁：首帧渲染前从 localStorage 恢复 data-theme/data-style，applyTheme 持久化风格偏好到 localStorage',
+  ]},
   { ver: 'v2.1.13', date: '2026-09-19', items: [
     '🖐 Neumorphism 新拟物派主题精确对齐 StyleKit showcase：阴影四档尺寸 1:1、Dark 模式表面色/阴影色重做、accent/danger/success 换 StyleKit 标准色',
   ]},
@@ -33,6 +42,7 @@ const APP_CHANGELOG = [
     '🧹 移除卡片右上角删除按钮',
   ]},
   { ver: 'v2.1.04', date: '2026-09-17', items: [
+    '🐛 修复导航栏模式卡片不显示',
     '🐛 修复移动端分组下拉框不显示',
   ]},
   { ver: 'v2.1.03', date: '2026-09-17', items: [
@@ -53,7 +63,7 @@ const APP_CHANGELOG = [
     '🔐 两步验证 + 访客锁屏 + 安全加固',
     '⚙️ 设置体系重构，白名单与默认值统一',
     '🎯 UI 交互主题化，顶栏自动隐藏 + 自定义确认弹窗',
-    '� Docker 内置 HTTPS，PWA 安装支持',
+    '📦 Docker 内置 HTTPS，PWA 安装支持',
   ]},
 ];
 
@@ -287,7 +297,9 @@ function setThemeMode(mode) {
 /** 主题：localStorage 手动锁定 > 后端默认设置；风格主题由 theme_style 决定；返回当前模式 */
 function applyTheme(settings) {
   const root = document.documentElement;
-  root.dataset.style = settings && SP_STYLES.includes(settings.theme_style) ? settings.theme_style : 'soft';
+  const style = settings && SP_STYLES.includes(settings.theme_style) ? settings.theme_style : 'soft';
+  root.dataset.style = style;
+  try { localStorage.setItem('sp_style', style); } catch (e) { /* 隐私模式忽略 */ }
 
   const saved = localStorage.getItem('sp_theme');
   const mode = saved === 'light' || saved === 'dark' || saved === 'system'

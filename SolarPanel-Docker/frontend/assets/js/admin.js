@@ -66,8 +66,10 @@ const ROLE_LABEL = { admin: '管理员', editor: '编辑者', viewer: '只读' }
   bindAccount();
   bindBackup();
   renderVersionInfo();
+  bindVersionCheck();   // 🔍 在线检测更新 + 一键下载升级
   applyRoleUI();
 
+  // —— 2MD: 新增 5 个功能模块 ——
   bindAudit();          // 审计日志（仅 admin）
   bindFeeds();          // 自定义 RSS 源
   bindImportBookmarks();// 书签导入
@@ -203,7 +205,8 @@ function bindModals() {
       document.getElementById(btn.dataset.close).classList.remove('show');
     });
   });
-  document.querySelectorAll('.modal').forEach(m => {
+  // 仅轻量弹窗（confirm/帮助/更新日志）允许点击空白关闭；表单类弹窗（卡片/分组/密码等）禁用防滑动误触
+  document.querySelectorAll('.modal[data-dismiss-bg]').forEach(m => {
     m.addEventListener('click', e => {
       if (e.target === m) m.classList.remove('show');
     });
@@ -257,6 +260,184 @@ function renderGroupOptions() {
   });
 }
 
+/* ---------- 分组预设图标库（9 大功能类别；n=显示短名，k=搜索关键词） ---------- */
+const GROUP_ICON_CATS = [
+  { c: '常用', list: [
+    { i: '⭐', n: '星标', k: '推荐 收藏 喜欢' }, { i: '🏠', n: '首页', k: '主页 家' },
+    { i: '👤', n: '个人', k: '用户 账户' }, { i: '🧭', n: '导航', k: '指南针 方向' },
+    { i: '📌', n: '置顶', k: '图钉 标记' }, { i: '🔥', n: '热门', k: '火爆 趋势' },
+    { i: '🆕', n: '最新', k: '新品 new' }, { i: '💎', n: '精品', k: '钻石 高级' },
+    { i: '🎯', n: '目标', k: '靶心 专注' }, { i: '💡', n: '灵感', k: '灯泡 创意' },
+    { i: '🌈', n: '趣味', k: '彩虹 多彩' }, { i: '🎁', n: '福利', k: '礼物 礼品' },
+    { i: '⏰', n: '时间', k: '闹钟 时钟' }, { i: '📅', n: '日历', k: '日期 日程' },
+    { i: '✅', n: '完成', k: '待办 对勾' }, { i: '🔰', n: '新手', k: '入门 初心' },
+    { i: '🌟', n: '闪耀', k: '星星' }, { i: '🚩', n: '旗帜', k: '旗子' },
+    { i: '📍', n: '位置', k: '定位' }, { i: '❤️', n: '红心', k: '喜欢 爱心' },
+  ]},
+  { c: '电脑硬件', list: [
+    { i: '💻', n: '笔记本', k: '电脑 开发' }, { i: '🖥️', n: '显示器', k: '桌面 屏幕' },
+    { i: '📱', n: '手机', k: '移动端' }, { i: '⌨️', n: '键盘', k: '输入' },
+    { i: '🖱️', n: '鼠标', k: '外设' }, { i: '🖲️', n: '轨迹球', k: '' },
+    { i: '🖨️', n: '打印机', k: '打印' }, { i: '📠', n: '传真机', k: '传真' },
+    { i: '☎️', n: '座机', k: '电话' }, { i: '📞', n: '电话', k: '联系' },
+    { i: '📟', n: '寻呼机', k: '终端 传呼' }, { i: '📺', n: '电视', k: '显示屏' },
+    { i: '🧮', n: '计算器', k: '算盘' }, { i: '🔋', n: '电池', k: '电源 电量' },
+    { i: '🔌', n: '插头', k: '充电' }, { i: '🔦', n: '手电筒', k: '照明' },
+    { i: '🕹️', n: '摇杆', k: '街机' }, { i: '💾', n: '软盘', k: '保存' },
+    { i: '💿', n: '光盘', k: '光碟' }, { i: '📀', n: 'DVD', k: '影碟' },
+    { i: '💽', n: '磁盘', k: '唱片' }, { i: '📼', n: '录像带', k: '' },
+    { i: '📡', n: '天线', k: '信号 路由' }, { i: '🕰️', n: '手表', k: '钟表' },
+    { i: '⌛', n: '沙漏', k: '等待' }, { i: '⏳', n: '加载', k: '沙漏' },
+    { i: '🧷', n: '别针', k: '安全' }, { i: '📲', n: '手机消息', k: '来电' },
+    { i: '🔣', n: '符号', k: '符号输入' }, { i: '🔢', n: '数字', k: '数字输入' },
+    { i: '🔠', n: '大写字母', k: '' }, { i: '🔡', n: '小写字母', k: '' },
+    { i: '🅰️', n: 'A型', k: '字母A' }, { i: '🅱️', n: 'B型', k: '字母B' },
+  ]},
+  { c: '网络技术', list: [
+    { i: '🌐', n: '万维网', k: '网站 外网 互联网' }, { i: '☁️', n: '云服务', k: '云端 云朵' },
+    { i: '🔗', n: '链接', k: '网址 连接' }, { i: '📶', n: 'WiFi', k: '无线 信号' },
+    { i: '🛰️', n: '卫星', k: '' }, { i: '🐙', n: 'GitHub', k: '章鱼 代码 托管' },
+    { i: '🐧', n: 'Linux', k: '企鹅 系统' }, { i: '🐳', n: 'Docker', k: '容器 鲸鱼' },
+    { i: '🦊', n: '火狐', k: '浏览器 Firefox' }, { i: '🤖', n: '机器人', k: 'AI 自动化' },
+    { i: '🧠', n: '大脑', k: '智能' }, { i: '⚙️', n: '齿轮', k: '设置 配置' },
+    { i: '🔧', n: '扳手', k: '工具 维修' }, { i: '🧪', n: '试管', k: '测试 实验' },
+    { i: '🔬', n: '显微镜', k: '科学 研究' }, { i: '🔍', n: '放大镜', k: '搜索 查找' },
+    { i: '🧩', n: '拼图', k: '插件 扩展' }, { i: '🔐', n: '安全锁', k: '内网 加密' },
+    { i: '🔒', n: '挂锁', k: '私密 加密' }, { i: '🛡️', n: '盾牌', k: '安全 防护' },
+    { i: '🔏', n: '签名', k: '加密' }, { i: '🔑', n: '钥匙', k: '密码 key' },
+    { i: '🗝️', n: '密钥', k: '钥匙 SSH' }, { i: '🆔', n: '身份', k: 'ID 证件' },
+    { i: '🆘', n: '帮助', k: 'SOS 紧急' }, { i: '🧬', n: 'DNA', k: '基因' },
+    { i: '🦠', n: '病毒', k: '恶意软件' }, { i: '🪝', n: '钩子', k: 'hook' },
+    { i: '⚛️', n: '原子', k: '物理 科学' }, { i: '🧫', n: '培养皿', k: '生物' },
+    { i: '🕸️', n: '蜘蛛网', k: '网络 web' }, { i: '🧵', n: '线程', k: 'thread' },
+    { i: '🌡️', n: '温度计', k: '温度' }, { i: '🔭', n: '望远镜', k: '观测' },
+    { i: '📳', n: '震动', k: '振动' }, { i: '🪢', n: '绳结', k: '节点' },
+    { i: '⚡', n: '闪电', k: '电力 高速' }, { i: '🌀', n: '漩涡', k: '异步' },
+  ]},
+  { c: '媒体影音', list: [
+    { i: '🎬', n: '电影', k: '影视 影片' }, { i: '🎥', n: '摄影机', k: '视频 拍摄' },
+    { i: '🎵', n: '音符', k: '音乐 歌曲' }, { i: '🎶', n: '旋律', k: '音乐' },
+    { i: '🎧', n: '耳机', k: '播客 音频' }, { i: '🎙️', n: '麦克风', k: '录音' },
+    { i: '🎤', n: '话筒', k: 'K歌 唱歌' }, { i: '📻', n: '收音机', k: '电台 广播' },
+    { i: '🎼', n: '乐谱', k: '作曲' }, { i: '🎹', n: '钢琴', k: '琴键' },
+    { i: '🥁', n: '鼓', k: '打击乐' }, { i: '🎺', n: '小号', k: '铜管' },
+    { i: '🎻', n: '小提琴', k: '弦乐' }, { i: '🎷', n: '萨克斯', k: '管乐' },
+    { i: '🎸', n: '吉他', k: '' }, { i: '🪕', n: '班卓琴', k: '' },
+    { i: '🪘', n: '长鼓', k: '鼓' }, { i: '🎭', n: '戏剧', k: '面具 舞台' },
+    { i: '🩰', n: '芭蕾', k: '舞蹈' }, { i: '💃', n: '舞蹈', k: '跳舞' },
+    { i: '🕺', n: '舞者', k: '跳舞' }, { i: '🎮', n: '游戏', k: '手柄' },
+    { i: '🎲', n: '骰子', k: '桌游 随机' }, { i: '🃏', n: '扑克', k: '桌游 卡牌' },
+    { i: '🎴', n: '花札', k: '卡牌' }, { i: '🎳', n: '保龄球', k: '' },
+    { i: '🍿', n: '爆米花', k: '休闲 追剧' }, { i: '🎞️', n: '胶片', k: '胶卷' },
+    { i: '📽️', n: '放映机', k: '老电影' }, { i: '🔊', n: '喇叭', k: '音量' },
+    { i: '🔇', n: '静音', k: '' }, { i: '🔉', n: '音量', k: '中音量' },
+    { i: '🔈', n: '声音', k: '小音量' }, { i: '▶️', n: '播放', k: '开始' },
+    { i: '⏯️', n: '播放暂停', k: '' }, { i: '⏭️', n: '下一首', k: '' },
+    { i: '⏮️', n: '上一首', k: '' }, { i: '🔁', n: '循环', k: '重复' },
+    { i: '🔂', n: '单曲循环', k: '' }, { i: '⏺️', n: '录制', k: '录像' },
+    { i: '⏸️', n: '暂停', k: '' }, { i: '⏹️', n: '停止', k: '' },
+    { i: '🔀', n: '随机播放', k: '随机' }, { i: '📯', n: '号角', k: '邮号' },
+    { i: '⏩', n: '快进', k: '' }, { i: '⏪', n: '快退', k: '' },
+  ]},
+  { c: '图像摄影', list: [
+    { i: '📸', n: '相机', k: '摄影 拍照' }, { i: '📷', n: '照相机', k: '拍照' },
+    { i: '🖼️', n: '相框', k: '图片 相册' }, { i: '🎨', n: '调色板', k: '美术 设计' },
+    { i: '🖌️', n: '画笔', k: '绘画' }, { i: '🖍️', n: '蜡笔', k: '涂色' },
+    { i: '✏️', n: '铅笔', k: '书写' }, { i: '✒️', n: '钢笔尖', k: '写作' },
+    { i: '🖊️', n: '签字笔', k: '书写' }, { i: '🌄', n: '日出', k: '风景' },
+    { i: '🏞️', n: '山水', k: '风景' }, { i: '🌅', n: '晨曦', k: '日出' },
+    { i: '🌠', n: '流星', k: '星空' }, { i: '🌌', n: '银河', k: '星空 夜景' },
+    { i: '✨', n: '闪星', k: '特效 闪耀' }, { i: '🎆', n: '烟花', k: '焰火' },
+    { i: '🎇', n: '焰火', k: '烟花' }, { i: '🌉', n: '夜桥', k: '夜景' },
+    { i: '🏙️', n: '城市', k: '都市' }, { i: '🌃', n: '夜空', k: '夜晚' },
+    { i: '🏔️', n: '雪山', k: '山峰' }, { i: '🌋', n: '火山', k: '岩浆' },
+    { i: '🏝️', n: '海岛', k: '岛屿' }, { i: '🏖️', n: '沙滩', k: '海边' },
+    { i: '🌊', n: '海浪', k: '大海' }, { i: '🌁', n: '雾景', k: '雾气' },
+    { i: '🌆', n: '黄昏', k: '暮色' }, { i: '🌇', n: '夕阳', k: '日落城市' },
+  ]},
+  { c: '文件办公', list: [
+    { i: '📁', n: '文件夹', k: '目录' }, { i: '📂', n: '打开夹', k: '目录' },
+    { i: '🗂️', n: '归档', k: '分类' }, { i: '📋', n: '清单', k: '列表 任务' },
+    { i: '🏷️', n: '标签', k: '标记 tag' }, { i: '📦', n: '包裹', k: '资源 打包' },
+    { i: '📥', n: '收件箱', k: '收件' }, { i: '📤', n: '发件箱', k: '发送' },
+    { i: '⬇️', n: '下载', k: '保存' }, { i: '⬆️', n: '上传', k: '分享' },
+    { i: '🗄️', n: '档案柜', k: '存储 数据库' }, { i: '📎', n: '回形针', k: '附件' },
+    { i: '🔖', n: '书签', k: '收藏夹' }, { i: '🗃️', n: '卡片盒', k: '索引' },
+    { i: '📊', n: '图表', k: '数据 统计' }, { i: '📈', n: '趋势图', k: '增长' },
+    { i: '📉', n: '下降图', k: '统计' }, { i: '🗒️', n: '便签', k: '记事本' },
+    { i: '🗑️', n: '回收站', k: '删除' }, { i: '📇', n: '名片', k: '卡片目录' },
+    { i: '📑', n: '标签页', k: '网页' }, { i: '🗜️', n: '压缩', k: '解压' },
+    { i: '📔', n: '记事本', k: '日记本' }, { i: '📕', n: '红书', k: '书本' },
+    { i: '📗', n: '绿书', k: '书本' }, { i: '📘', n: '蓝书', k: '书本' },
+    { i: '📙', n: '橙书', k: '书本' }, { i: '📒', n: '账本', k: '' },
+    { i: '🔓', n: '解锁', k: '打开' }, { i: '📆', n: '日程', k: '日期' },
+    { i: '🗓️', n: '月历', k: '日历' }, { i: '🏺', n: '陶罐', k: '古董' },
+  ]},
+  { c: '资讯社交', list: [
+    { i: '📰', n: '报纸', k: '新闻' }, { i: '🗞️', n: '报纸卷', k: '媒体' },
+    { i: '📢', n: '公告', k: '喇叭' }, { i: '📣', n: '扩音器', k: '宣传' },
+    { i: '📚', n: '书籍', k: '阅读 学习' }, { i: '📖', n: '打开书', k: '阅读' },
+    { i: '📓', n: '笔记本', k: '记录' }, { i: '📝', n: '笔记', k: '编辑' },
+    { i: '✉️', n: '邮件', k: '邮箱 信件' }, { i: '📧', n: '邮箱', k: 'email' },
+    { i: '📨', n: '来信', k: '邮件' }, { i: '💬', n: '聊天', k: '对话 评论' },
+    { i: '🗨️', n: '评论', k: '气泡' }, { i: '🔔', n: '通知', k: '铃铛 提醒' },
+    { i: '🎓', n: '毕业', k: '学习 教育' }, { i: '📜', n: '卷轴', k: '历史' },
+    { i: '📄', n: '文件', k: '文档' }, { i: '📃', n: '文档', k: '文件' },
+    { i: '🧾', n: '收据', k: '账单' }, { i: '👥', n: '团队', k: '成员' },
+    { i: '🏛️', n: '政务', k: '政府' }, { i: '⚖️', n: '法律', k: '天平' },
+    { i: '📮', n: '邮筒', k: '寄信' }, { i: '✍️', n: '写作', k: '书写' },
+    { i: '💭', n: '想法', k: '思考' }, { i: '🗯️', n: '情绪', k: '愤怒' },
+    { i: '💌', n: '情书', k: '邮件' }, { i: '🔕', n: '免打扰', k: '静音' },
+    { i: '👪', n: '家庭', k: '家人' }, { i: '🤝', n: '握手', k: '合作' },
+    { i: '👋', n: '挥手', k: '你好' }, { i: '🙋', n: '举手', k: '提问' },
+  ]},
+  { c: '美食', list: [
+    { i: '🍔', n: '汉堡', k: '快餐' }, { i: '🍕', n: '披萨', k: '西餐' },
+    { i: '🍜', n: '面食', k: '面条' }, { i: '🍱', n: '便当', k: '外卖' },
+    { i: '☕', n: '咖啡', k: '饮品' }, { i: '🍺', n: '啤酒', k: '喝酒' },
+    { i: '🍵', n: '茶', k: '饮茶' },
+    { i: '🍟', n: '薯条', k: '快餐' }, { i: '🌭', n: '热狗', k: '快餐' },
+    { i: '🥪', n: '三明治', k: '西餐' }, { i: '🌮', n: '塔可', k: '墨西哥' },
+    { i: '🌯', n: '卷饼', k: '墨西哥' }, { i: '🥗', n: '沙拉', k: '轻食' },
+    { i: '🍲', n: '火锅', k: '炖煮' }, { i: '🥡', n: '餐盒', k: '外卖' },
+    { i: '🍙', n: '饭团', k: '日料' }, { i: '🍚', n: '米饭', k: '主食' },
+    { i: '🍢', n: '关东煮', k: '日料' }, { i: '🍣', n: '寿司', k: '日料' },
+    { i: '🍤', n: '炸虾', k: '海鲜' }, { i: '🍳', n: '煎蛋', k: '早餐' },
+    { i: '🥞', n: '煎饼', k: '早餐' }, { i: '🍰', n: '蛋糕', k: '甜点' },
+    { i: '🎂', n: '生日糕', k: '生日' }, { i: '🍧', n: '刨冰', k: '冰品' },
+    { i: '🍨', n: '冰淇淋', k: '甜品' }, { i: '🍦', n: '甜筒', k: '冰品' },
+    { i: '🧁', n: '纸杯糕', k: '甜品' }, { i: '🍫', n: '巧克力', k: '甜品' },
+    { i: '🍬', n: '糖果', k: '零食' }, { i: '🍭', n: '棒棒糖', k: '零食' },
+    { i: '🍯', n: '蜂蜜', k: '甜食' }, { i: '🥤', n: '饮料', k: '饮品' },
+    { i: '🧋', n: '奶茶', k: '饮品' },
+  ]},
+  { c: '生活运动', list: [
+    { i: '✈️', n: '飞机', k: '旅行' }, { i: '🚗', n: '汽车', k: '出行' },
+    { i: '🚆', n: '火车', k: '高铁' }, { i: '🗺️', n: '地图', k: '旅游' },
+    { i: '🧳', n: '行李', k: '旅行' }, { i: '🚕', n: '出租', k: '打车' },
+    { i: '🚌', n: '公交', k: '巴士' }, { i: '🏍️', n: '摩托', k: '机车' },
+    { i: '🚲', n: '单车', k: '自行车' }, { i: '🚁', n: '直升机', k: '飞行' },
+    { i: '🛳️', n: '邮轮', k: '游船' }, { i: '⛵', n: '帆船', k: '' },
+    { i: '🚤', n: '快艇', k: '' }, { i: '🛶', n: '独木舟', k: '皮划艇' },
+    { i: '💰', n: '钱袋', k: '理财' }, { i: '🛒', n: '购物', k: '购物车' },
+    { i: '⚽', n: '足球', k: '运动' }, { i: '🏀', n: '篮球', k: '体育' },
+    { i: '🎾', n: '网球', k: '运动' }, { i: '🏃', n: '跑步', k: '健身' },
+    { i: '⚾', n: '棒球', k: '运动' }, { i: '🏐', n: '排球', k: '运动' },
+    { i: '🥏', n: '飞盘', k: '运动' }, { i: '🏸', n: '羽毛球', k: '运动' },
+    { i: '🥊', n: '拳击', k: '格斗' }, { i: '⛳', n: '高尔夫', k: '运动' },
+    { i: '😀', n: '笑脸', k: '表情' }, { i: '🧸', n: '玩具', k: '泰迪熊' },
+    { i: '🐶', n: '小狗', k: '宠物' }, { i: '🦄', n: '独角兽', k: '神兽' },
+    { i: '🔮', n: '水晶球', k: '魔法' }, { i: '🪄', n: '魔法棒', k: '魔术' },
+    { i: '🎈', n: '气球', k: '派对' }, { i: '🎉', n: '彩带', k: '庆祝' },
+    { i: '🛌', n: '睡觉', k: '休息' }, { i: '🧘', n: '瑜伽', k: '冥想' },
+    { i: '🏥', n: '医院', k: '医疗' }, { i: '🏦', n: '银行', k: '' },
+    { i: '🏫', n: '学校', k: '教育' }, { i: '⛪', n: '教堂', k: '' },
+    { i: '🌿', n: '植物', k: '自然' }, { i: '🌻', n: '向日葵', k: '花朵' },
+    { i: '🐾', n: '爪印', k: '宠物' }, { i: '💍', n: '戒指', k: '婚礼' },
+    { i: '🌷', n: '郁金香', k: '花' }, { i: '🪴', n: '盆栽', k: '植物' },
+  ]},
+];
+
 function renderGroupsTable() {
   const tbody = document.getElementById('groupsTbody');
   tbody.innerHTML = '';
@@ -271,7 +452,10 @@ function renderGroupsTable() {
     if (!vis) tr.classList.add('row-hidden');
     tr.innerHTML =
       '<td class="drag-cell"><span class="drag-handle" title="拖动调整顺序">⠿</span></td>' +
-      '<td>' + esc(g.title) + '</td>' +
+      '<td><span class="g-table-name">' +
+        (g.icon ? '<span class="g-table-icon">' + esc(g.icon) + '</span>' : '') +
+        '<span>' + esc(g.title) + '</span>' +
+      '</span></td>' +
       '<td style="color:var(--text-muted)">' + esc(g.description) + '</td>' +
       '<td>' + g.item_count + '</td>' +
       '<td class="vis-cell">' +
@@ -307,6 +491,7 @@ async function groupAction(act, g) {
     document.getElementById('g_id').value = g.id;
     document.getElementById('g_title').value = g.title;
     document.getElementById('g_desc').value = g.description || '';
+    setGroupIconValue(g.icon || '');
     document.getElementById('groupModal').classList.add('show');
     return;
   }
@@ -330,6 +515,7 @@ function bindGroups() {
     document.getElementById('g_id').value = '';
     document.getElementById('g_title').value = '';
     document.getElementById('g_desc').value = '';
+    setGroupIconValue('');
     document.getElementById('groupModal').classList.add('show');
   };
   document.getElementById('groupForm').addEventListener('submit', async e => {
@@ -340,6 +526,7 @@ function bindGroups() {
       await API.post(API_BASE + 'groups.php?action=edit', {
         id: Number(document.getElementById('g_id').value) || 0,
         title: document.getElementById('g_title').value.trim(),
+        icon: document.getElementById('g_icon').value,
         description: document.getElementById('g_desc').value.trim(),
       });
       document.getElementById('groupModal').classList.remove('show');
@@ -352,6 +539,109 @@ function bindGroups() {
       btn.disabled = false;
     }
   });
+  bindGroupIconPicker();
+}
+
+/* ---------- 分组图标选择器 ---------- */
+/** 写入当前选中图标并更新选择按钮预览 */
+function setGroupIconValue(v) {
+  document.getElementById('g_icon').value = v || '';
+  const btn = document.getElementById('gIconPick');
+  btn.textContent = '';
+  if (v) {
+    btn.appendChild(document.createTextNode(v));
+  } else {
+    const ph = document.createElement('span');
+    ph.className = 'g-icon-placeholder';
+    ph.textContent = '图标';
+    btn.appendChild(ph);
+  }
+}
+
+function bindGroupIconPicker() {
+  const pickBtn = document.getElementById('gIconPick');
+  const modal = document.getElementById('groupIconModal');
+  const box = modal.querySelector('.modal-box');
+  const body = document.getElementById('gicBody');
+  const search = document.getElementById('gicSearch');
+  let currentKw = '';
+
+  /* 构建一个图标按钮（图标 + 短名，短名永不换行） */
+  const buildItem = (o, current) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'gic-item' + (o.i === current ? ' active' : '');
+    const emo = document.createElement('span');
+    emo.className = 'gic-emoji';
+    emo.textContent = o.i;
+    const nm = document.createElement('span');
+    nm.className = 'gic-name';
+    nm.textContent = o.n;
+    btn.appendChild(emo);
+    btn.appendChild(nm);
+    btn.title = o.n + (o.k ? ' ' + o.k : '');
+    btn.onclick = () => {
+      setGroupIconValue(o.i);
+      modal.classList.remove('show');
+    };
+    return btn;
+  };
+
+  /* 按分类渲染（搜索时仅保留命中分类，分组结构不变） */
+  const renderBody = () => {
+    const current = document.getElementById('g_icon').value;
+    body.innerHTML = '';
+    let total = 0;
+    GROUP_ICON_CATS.forEach((cat, ci) => {
+      const list = currentKw
+        ? cat.list.filter(o =>
+            o.n.toLowerCase().includes(currentKw) ||
+            o.k.toLowerCase().includes(currentKw) ||
+            o.i.includes(currentKw))
+        : cat.list;
+      if (!list.length) return;
+      total += list.length;
+      const sec = document.createElement('section');
+      sec.className = 'gic-cat';
+      sec.dataset.ci = ci;
+      const head = document.createElement('div');
+      head.className = 'gic-cat-head';
+      const bar = document.createElement('span');
+      bar.className = 'gic-cat-bar';
+      head.appendChild(bar);
+      head.appendChild(document.createTextNode(cat.c));
+      const grid = document.createElement('div');
+      grid.className = 'gic-cat-grid';
+      list.forEach(o => grid.appendChild(buildItem(o, current)));
+      sec.appendChild(head);
+      sec.appendChild(grid);
+      body.appendChild(sec);
+    });
+    if (!total) {
+      const empty = document.createElement('div');
+      empty.className = 'gic-empty';
+      empty.textContent = '没有找到匹配的图标';
+      body.appendChild(empty);
+    }
+  };
+
+  pickBtn.onclick = () => {
+    search.value = '';
+    currentKw = '';
+    renderBody();
+    modal.classList.add('show');
+    box.scrollTop = 0;
+    setTimeout(() => search.focus(), 50);
+  };
+  search.addEventListener('input', () => {
+    currentKw = search.value.trim().toLowerCase();
+    renderBody();
+    box.scrollTop = 0;
+  });
+  document.getElementById('gicClear').onclick = () => {
+    setGroupIconValue('');
+    modal.classList.remove('show');
+  };
 }
 
 /* ================= 卡片 ================= */
@@ -495,6 +785,7 @@ function iconFor(item) {
   const layout = textLayout(txt);
   const chars = Array.from(txt);
 
+  // 后台表格图标容器约 26px（style="width:34px;height:34px" 但有 padding？实际 render 内测）
   let fontSize;
   if (layout === 'cn')
     fontSize = Math.min(14, Math.floor((26 / 2) * 0.92));
@@ -992,6 +1283,7 @@ function fillSettingsForm(s) {
   updateSettingPreview('s_wallpaper');
   syncGalleryActive(s.wallpaper || '');
 
+  // —— 2MD: 访客密码开关 / 每日壁纸源 回填 ——
   const gaEl = document.getElementById('s_guest_access_enabled');
   if (gaEl) gaEl.value = s.guest_access_enabled === '1' ? '1' : '0';
   const wsEl = document.getElementById('s_wallpaper_source');
@@ -2107,5 +2399,134 @@ function bindDailyWallpaper() {
       toast('已选择：' + sel.options[sel.selectedIndex].text + '，刷新主页后生效', 'info');
     }
   });
+}
+
+/* ============ 🔍 在线检测更新 + 一键下载并升级 ============ */
+function bindVersionCheck() {
+  const btn = document.getElementById('checkUpdateBtn');
+  const result = document.getElementById('versionCheckResult');
+  if (!btn || !result) return;
+
+  // 渲染检测结果（手动点击与进后台自动检测共用）
+  const renderResult = (d) => {
+    if (d.available === false) {
+      result.className = 'version-check-result ok';
+      result.innerHTML = `✅ 当前已是最新版本 <b>${d.current}</b>`;
+      result.hidden = false;
+      return;
+    }
+    const cl = (d.changelog || []).map(c => `<li class="cl-${c.type || 'feature'}">${String(c.item).replace(/[&<>]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]))}</li>`).join('');
+    const sizeStr = d.size ? (() => { const s = d.size; return s > 1048576 ? (s/1048576).toFixed(2)+' MB' : s > 1024 ? (s/1024).toFixed(1)+' KB' : s+' B'; })() : '';
+    result.className = 'version-check-result new';
+    if (!d.package_url) {
+      result.innerHTML = `🎉 发现新版本 <b>${d.latest}</b>（当前 ${d.current}）
+        ${cl ? `<ul class="vc-changelog">${cl}</ul>` : ''}
+        <div class="vc-hint">新版完整升级包尚未同步到更新源，请稍后再点「检查更新」，或联系作者获取。</div>`;
+      result.hidden = false;
+      return;
+    }
+    result.innerHTML = `
+      🎉 发现新版本 <b>${d.latest}</b>（当前 ${d.current}）${sizeStr ? ' · ' + sizeStr : ''}${d.full_pkg ? ' · 完整包' : ''}
+      ${cl ? `<ul class="vc-changelog">${cl}</ul>` : ''}
+      <div class="vc-hint">
+        <button class="btn btn-primary" id="vcDownloadApplyBtn" type="button">🔽 一键下载并升级</button>
+        <span style="margin-left:8px">自动备份原文件，失败自动回滚；升级后页面自动刷新。</span>
+      </div>
+    `;
+    result.hidden = false;
+
+    const applyBtn = result.querySelector('#vcDownloadApplyBtn');
+    if (applyBtn) applyBtn.onclick = async () => {
+      applyBtn.disabled = true;
+      applyBtn.textContent = '下载中...';
+      try {
+        const dlRes = await API.post(API_BASE + 'version.php?action=download', {
+          url: d.package_url,
+          md5: d.package_md5
+        });
+        const token = dlRes.token;
+        if (!token) throw new Error('下载失败：未获取到升级会话 token');
+        applyBtn.textContent = '应用中...';
+        await API.post(API_BASE + 'upgrade.php?action=apply', { token });
+        applyBtn.textContent = '升级成功，即将刷新...';
+        toast('升级完成：已更新到 ' + d.latest + '，页面即将刷新', 'success');
+        setTimeout(() => location.reload(), 2500);
+      } catch (e) {
+        applyBtn.disabled = false;
+        applyBtn.textContent = '🔽 一键下载并升级';
+        const msg = (e && e.message) ? e.message : '未知错误';
+        const failed = e && e.data && Array.isArray(e.data.failed) ? e.data.failed : [];
+        if (failed.length) {
+          const lines = failed.slice(0, 6).map(f => '• ' + f.path + ' — ' + (f.reason || '写入失败')).join('\n');
+          const more = failed.length > 6 ? '\n…（共 ' + failed.length + ' 个文件失败，已自动回滚）' : '';
+          result.className = 'version-check-result err';
+          result.innerHTML = '';
+          const p = document.createElement('div');
+          p.textContent = '❌ ' + msg;
+          const pre = document.createElement('pre');
+          pre.style.cssText = 'white-space:pre-wrap;text-align:left;margin:8px 0 0;font:12px/1.6 inherit;max-height:200px;overflow:auto;';
+          pre.textContent = lines + more;
+          result.appendChild(p);
+          result.appendChild(pre);
+          result.hidden = false;
+          result.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        toast('升级失败：' + msg, 'error');
+      }
+    };
+  };
+
+  // 顶栏版本号旁亮「可更新」徽标，点击直达备份与更新页
+  const showBadge = (latest) => {
+    const ver = document.getElementById('appVer');
+    if (!ver || document.getElementById('updateBadge')) return;
+    const badge = document.createElement('a');
+    badge.id = 'updateBadge';
+    badge.className = 'update-badge';
+    badge.href = 'javascript:void(0)';
+    badge.textContent = '🆕 ' + latest + ' 可更新';
+    badge.title = '点击前往「备份与更新」一键升级';
+    badge.onclick = () => {
+      const tab = document.querySelector('.admin-tabs .tab[data-tab="backup"]');
+      if (tab) tab.click();
+      result.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+    ver.after(badge);
+  };
+
+  // 手动检查：强制绕过服务端 1h 缓存
+  btn.onclick = async () => {
+    btn.disabled = true;
+    btn.textContent = '检查中...';
+    result.hidden = true;
+    try {
+      const d = await API.get(API_BASE + 'version.php?action=check&nocache=1');
+      localStorage.setItem('sp_update_check_ts', String(Date.now()));
+      renderResult(d);
+      if (d.available) showBadge(d.latest);
+    } catch (e) {
+      result.className = 'version-check-result err';
+      result.innerHTML = '❌ 检查失败：' + (e.message || '无法连接到更新源，请稍后重试。');
+      result.hidden = false;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔍 检查更新';
+    }
+  };
+
+  // 进后台自动静默检测：localStorage 20min 节流（每小时最多 3 次）+ 服务端 1h 缓存，失败静默不打扰
+  const AUTO_TTL = 1200 * 1000;
+  const last = parseInt(localStorage.getItem('sp_update_check_ts') || '0', 10);
+  if (Date.now() - last < AUTO_TTL) return;
+  setTimeout(async () => {
+    try {
+      const d = await API.get(API_BASE + 'version.php?action=check');
+      localStorage.setItem('sp_update_check_ts', String(Date.now()));
+      if (d && d.available) {
+        renderResult(d);
+        showBadge(d.latest);
+      }
+    } catch (e) { /* 自动检测失败静默：不影响后台正常使用 */ }
+  }, 2500);
 }
 

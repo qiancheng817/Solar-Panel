@@ -30,6 +30,7 @@ try {
     $isViewerOrEditor = user_has_role($u, 'viewer', 'editor');
     $isGuest = !empty($_SESSION['is_guest']);
     ensure_group_visible_column();
+    ensure_group_icon_column();
 
     // guest_required：未登录 + guest_access_enabled=1 → true
     $guestEnabled = (int)($settings['guest_access_enabled'] ?? '0');
@@ -46,12 +47,12 @@ try {
     }
 
     if ($isAdmin) {
-        $groups = db()->query('SELECT id, title, description, is_visible FROM item_groups ORDER BY sort ASC, id ASC')->fetchAll();
+        $groups = db()->query('SELECT id, title, icon, description, is_visible FROM item_groups ORDER BY sort ASC, id ASC')->fetchAll();
     } elseif ($u) {
         // 已登录（editor/viewer/guest）：能看全部分组
-        $groups = db()->query('SELECT id, title, description, is_visible FROM item_groups ORDER BY sort ASC, id ASC')->fetchAll();
+        $groups = db()->query('SELECT id, title, icon, description, is_visible FROM item_groups ORDER BY sort ASC, id ASC')->fetchAll();
     } else {
-        $groups = db()->query('SELECT id, title, description FROM item_groups WHERE is_visible = 1 ORDER BY sort ASC, id ASC')->fetchAll();
+        $groups = db()->query('SELECT id, title, icon, description FROM item_groups WHERE is_visible = 1 ORDER BY sort ASC, id ASC')->fetchAll();
     }
     $items  = db()->query(
         'SELECT id, group_id, title, url, lan_url, description, icon_type, icon_value, icon_bg, open_method

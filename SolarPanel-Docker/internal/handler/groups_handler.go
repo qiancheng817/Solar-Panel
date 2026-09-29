@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"solarpanel/internal/db"
 	"solarpanel/internal/model"
@@ -64,6 +65,7 @@ func (h *GroupsHandler) Edit(c *gin.Context) {
 	var body struct {
 		ID          uint   `json:"id"`
 		Title       string `json:"title"`
+		Icon        string `json:"icon"`
 		Description string `json:"description"`
 		Sort        int    `json:"sort"`
 		IsVisible   int    `json:"is_visible"`
@@ -76,10 +78,21 @@ func (h *GroupsHandler) Edit(c *gin.Context) {
 		FailMsg(c, "标题不能为空")
 		return
 	}
+	// 分组图标：去尖角号并按 rune 截断到 8，与 PHP 版保持一致
+	icon := strings.Map(func(r rune) rune {
+		if r == '<' || r == '>' {
+			return -1
+		}
+		return r
+	}, body.Icon)
+	if rs := []rune(icon); len(rs) > 8 {
+		icon = string(rs[:8])
+	}
 
 	if body.ID == 0 {
 		g := model.ItemGroup{
 			Title:       body.Title,
+			Icon:        icon,
 			Description: body.Description,
 			Sort:        body.Sort,
 			IsVisible:   body.IsVisible,
@@ -98,6 +111,7 @@ func (h *GroupsHandler) Edit(c *gin.Context) {
 		return
 	}
 	g.Title = body.Title
+	g.Icon = icon
 	g.Description = body.Description
 	g.Sort = body.Sort
 	g.IsVisible = body.IsVisible

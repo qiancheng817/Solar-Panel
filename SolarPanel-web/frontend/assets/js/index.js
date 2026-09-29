@@ -509,6 +509,75 @@ function renderSearch() {
   }
 }
 
+/* ============================================================
+   应用图标即时加载补丁（基于 v2.1.16，仅优化卡片图标加载时机）
+   ------------------------------------------------------------
+   原实现每次切换分组都销毁重建卡片 DOM，favicon 型卡片重新发起
+   第三方图标服务请求（串行回退 4 个源），onload 之前图标区是空白。
+   本补丁不改变任何既有功能，只做三件事：
+     1) __iconUrlCache  缓存已验证可用的图标 URL，切换分组直接复用
+     2) __iconDeadHost  记录已确认全部失败的 host，不再重复请求
+     3) 卡片先渲染文字图标占位，图片就绪后替换 —— 杜绝空白等待
+     4) 首屏后后台预取所有分组图标，后续切换零网络等待
+   ============================================================ */
+const __iconUrlCache = new Map();   // host -> 已成功加载的图标 URL
+const __iconDeadHost = new Set();   // host -> 所有候选源均失败
+const __iconPrefetching = new Set(); // 正在/已预取的 URL，避免重复
+
+/** 取 URL 的 hostname，失败返回空串 */
+function __iconHost(url) {
+  try { return new URL(url).hostname || ''; } catch (e) { return ''; }
+}
+
+/** 探测并缓存某站点图标；resolve 可用的 URL，全部失败 resolve '' */
+function __prefetchIcon(rawUrl) {
+  const host = __iconHost(rawUrl);
+  if (!host) return Promise.resolve('');
+  if (__iconUrlCache.has(host)) return Promise.resolve(__iconUrlCache.get(host));
+  if (__iconDeadHost.has(host)) return Promise.resolve('');
+
+  const sources = faviconSources(rawUrl);
+  if (!sources.length) return Promise.resolve('');
+
+  return new Promise(resolve => {
+    let si = 0;
+    const tryNext = () => {
+      if (si >= sources.length) {
+        __iconDeadHost.add(host);
+        resolve('');
+        return;
+      }
+      const src = sources[si];
+      const probe = new Image();
+      probe.referrerPolicy = 'no-referrer';
+      probe.onload = () => { __iconUrlCache.set(host, src); resolve(src); };
+      probe.onerror = () => { si += 1; tryNext(); };
+      probe.src = src;
+    };
+    tryNext();
+  });
+}
+
+/** 后台静默预取所有分组内 favicon 型卡片的图标 */
+function __prefetchAllIcons() {
+  const urls = new Set();
+  (state.groups || []).forEach(g => {
+    (g.items || []).forEach(it => {
+      if (it.icon_type === 'favicon' && it.url) urls.add(it.url);
+    });
+  });
+  urls.forEach(u => {
+    if (__iconPrefetching.has(u)) return;
+    __iconPrefetching.add(u);
+    __prefetchIcon(u);
+  });
+}
+
+/** 导航栏模式下已渲染的分组 DOM 缓存：groupId -> section
+ *  切换分组时直接复用，避免重建卡片导致图标重新加载。
+ *  仅在 renderGroups()（数据变更）时整体失效。 */
+const __groupSectionCache = new Map();
+
 /* ---------- 分组与卡片 ---------- */
 
 /** 渲染单个分组到容器（nav 模式只渲染选中分组时复用） */
@@ -525,7 +594,13 @@ function renderGroupCard(container, g, styleApp, idx, skipIntro) {
   const head = document.createElement('div');
   head.className = 'group-head';
   const h2 = document.createElement('h2');
-  h2.textContent = g.title;
+  if (g.icon) {
+    const ic = document.createElement('span');
+    ic.className = 'g-title-icon';
+    ic.textContent = g.icon;
+    h2.appendChild(ic);
+  }
+  h2.appendChild(document.createTextNode(g.title));
   head.appendChild(h2);
   // 隐藏分组徽章（仅登录管理员会拿到隐藏分组数据）
   if (g.is_visible === 0) {
@@ -609,9 +684,14 @@ function renderGroups() {
   const wrap = document.getElementById('groupsWrap');
   const styleApp = state.settings.card_style === 'app';
 
+  // 数据发生变化（首次加载 / 排序 / 编辑 / 权限变更），丢弃旧的分组 DOM 缓存
+  __groupSectionCache.clear();
+
   // 导航栏模式：由 renderGroupsNavbar 统一渲染（入口）
   if (state.settings.card_style === 'nav') {
     renderGroupsNavbar();
+    // 后台静默预取所有分组图标，后续切换分组时直接命中缓存
+    __prefetchAllIcons();
     return;
   }
 
@@ -635,6 +715,9 @@ function renderGroups() {
 
   // 同步左侧分组目录
   renderGroupNav();
+
+  // 后台静默预取所有分组图标
+  __prefetchAllIcons();
 }
 
 /* ---------- 左侧悬浮目录条（导航视图=分组目录 / 新闻视图=平台目录，共用同一对元素） ---------- */
@@ -704,8 +787,8 @@ function bindNavChrome() {
   }, { passive: true });
 }
 
-/** 构建一个目录项（targetId=跳转目标元素 id，dotColor=色点颜色，空则用默认灰点） */
-function buildNavItem(targetId, label, dotColor) {
+/** 构建一个目录项（targetId=跳转目标元素 id，dotColor=色点颜色，空则用默认灰点，icon=分组图标） */
+function buildNavItem(targetId, label, dotColor, icon) {
   const a = document.createElement('a');
   a.href = '#';
   a.className = 'gn-item';
@@ -713,10 +796,17 @@ function buildNavItem(targetId, label, dotColor) {
   const dot = document.createElement('span');
   dot.className = 'gn-dot';
   if (dotColor) { dot.style.background = dotColor; dot.style.opacity = '1'; }
+  if (icon) {
+    const ic = document.createElement('span');
+    ic.className = 'gn-icon';
+    ic.textContent = icon;
+    a.appendChild(ic);
+  } else {
+    a.appendChild(dot);
+  }
   const lab = document.createElement('span');
   lab.className = 'gn-label';
   lab.textContent = label;
-  a.appendChild(dot);
   a.appendChild(lab);
   a.addEventListener('click', e => {
     e.preventDefault();
@@ -751,7 +841,7 @@ function renderGroupNav() {
   if (!visibleGroups.length) { nav.innerHTML = ''; nav.hidden = true; if (toggle) toggle.hidden = true; return; }
 
   nav.innerHTML = '';
-  visibleGroups.forEach(g => nav.appendChild(buildNavItem('group-' + g.id, g.title, '')));
+  visibleGroups.forEach(g => nav.appendChild(buildNavItem('group-' + g.id, g.title, '', g.icon || '')));
   nav.hidden = false;
   if (toggle) toggle.hidden = false;
   __gnSetCollapsed(true);
@@ -782,8 +872,9 @@ function renderGroupsNavbar() {
     const hidden = g.is_visible === 0 || (g.items && g.items.length === 0);
     const btn = document.createElement('button');
     btn.className = 'ntab-btn' + (hidden ? ' ntab-hidden' : '');
-    btn.textContent = ' ' + g.title;
     btn.type = 'button';
+    if (g.icon) btn.appendChild(document.createTextNode(g.icon + ' '));
+    btn.appendChild(document.createTextNode(g.title));
     if (idx === state.navActiveGroupIdx) btn.classList.add('active');
     btn.onclick = () => {
       state.navActiveGroupIdx = idx;
@@ -801,7 +892,7 @@ function renderGroupsNavbar() {
       if (hidden) return;
       const opt = document.createElement('option');
       opt.value = idx;
-      opt.textContent = g.title;
+      opt.textContent = (g.icon ? g.icon + ' ' : '') + g.title;
       if (idx === state.navActiveGroupIdx) opt.selected = true;
       sel.appendChild(opt);
     });
@@ -834,11 +925,22 @@ function renderTabsOnly() {
 function renderNavbarCardsOnly() {
   const wrap = document.getElementById('groupsWrap');
   if (!wrap) return;
-  wrap.innerHTML = '';
   const g = state.groups[state.navActiveGroupIdx];
   if (!g) return;
   const styleApp = state.settings.card_style === 'app';
-  renderGroupCard(wrap, g, styleApp, state.navActiveGroupIdx, true);
+
+  // 复用该分组已渲染的 DOM：卡片与图标保持原样，切换时不再重建、不再重新加载图标
+  let sec = __groupSectionCache.get(g.id);
+  if (!sec) {
+    const holder = document.createElement('div');
+    renderGroupCard(holder, g, styleApp, state.navActiveGroupIdx, true);
+    sec = holder.firstElementChild;
+    if (sec) __groupSectionCache.set(g.id, sec);
+  }
+
+  wrap.innerHTML = '';
+  if (sec) wrap.appendChild(sec);
+
   state.groupIntroDone = true;
   state.cardsIntroDone = true;
 }
@@ -881,10 +983,13 @@ function buildCard(item, styleApp) {
   icon.className = 'icon';
   a.appendChild(icon); // ★ 提前进 DOM，renderTextIcon 才能读到真实 clientWidth
 
-  let iconDone = false;
+  let iconDone = false;    // 已渲染出真实图片（此后文字图标不再覆盖）
+  let textPainted = false; // 已绘制文字图标（占位或最终形态）
+
+  /** 文字图标：立即绘制，可作为占位或最终形态 */
   const useTextIcon = () => {
-    if (iconDone) return;
-    iconDone = true;
+    if (iconDone || textPainted) return;
+    textPainted = true;
     icon.classList.remove('has-img');
     // 文字型：手动文字优先 → 空则 fallback title
     let raw = '';
@@ -900,6 +1005,23 @@ function buildCard(item, styleApp) {
     icon.style.background = item.icon_bg || stringColor(item.title);
     renderTextIcon(icon, smartIconText(raw), 21);
   };
+
+  /** 真实图片：先在内存中加载完成，再原子替换文字占位，全程无空白 */
+  const paintImage = (src, noReferrer) => {
+    if (iconDone) return;
+    const img = new Image();
+    if (noReferrer) img.referrerPolicy = 'no-referrer';
+    img.onload = () => {
+      if (iconDone) return;
+      iconDone = true;
+      icon.innerHTML = '';
+      icon.appendChild(img);
+      icon.classList.add('has-img');
+    };
+    img.onerror = () => { if (!iconDone) { textPainted = false; useTextIcon(); } };
+    img.src = src;
+  };
+
   if (item.icon_type === 'image' && item.icon_value) {
     const img = document.createElement('img');
     img.src = assetUrl(item.icon_value);
@@ -908,23 +1030,20 @@ function buildCard(item, styleApp) {
     img.onload = () => { iconDone = true; icon.classList.add('has-img'); };
     icon.appendChild(img);
   } else if (item.icon_type === 'favicon' && item.url) {
-    // 客户端多源回退，全部失败再使用文字图标
-    const sources = faviconSources(item.url);
-    if (sources.length) {
-      const img = document.createElement('img');
-      img.alt = '';
-      img.referrerPolicy = 'no-referrer';
-      let si = 0;
-      img.onerror = () => {
-        si += 1;
-        if (si < sources.length) img.src = sources[si];
-        else useTextIcon();
-      };
-      img.onload = () => { iconDone = true; icon.classList.add('has-img'); };
-      img.src = sources[0];
-      icon.appendChild(img);
-    } else {
+    const host = __iconHost(item.url);
+    const cached = host ? __iconUrlCache.get(host) : '';
+    if (cached) {
+      // 命中图标缓存：直接复用，浏览器缓存瞬时命中，无需等待网络
+      paintImage(cached, true);
+    } else if (host && __iconDeadHost.has(host)) {
+      // 已确认所有候选源均失败：直接用文字图标，不再发无谓请求
       useTextIcon();
+    } else {
+      // 首次渲染：先画文字占位（立即可见），后台探测成功后无缝替换
+      useTextIcon();
+      __prefetchIcon(item.url).then(src => {
+        if (src && !iconDone) paintImage(src, true);
+      });
     }
   } else {
     useTextIcon();
@@ -2015,10 +2134,9 @@ function ensureQuickAddModal() {
     </div>`;
   document.body.appendChild(m);
 
-  // 关闭绑定
+  // 关闭绑定：表单类弹窗禁用点击空白关闭（防止移动端滑动误触）
   document.getElementById('qaCloseX').onclick = () => m.classList.remove('show');
   document.getElementById('qaCancel').onclick = () => m.classList.remove('show');
-  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('show'); });
 
   // 图标类型切换
   document.querySelectorAll('#qa_itype input').forEach(r => {

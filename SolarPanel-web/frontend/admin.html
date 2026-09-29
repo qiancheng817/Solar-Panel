@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN" data-theme="dark" data-style="soft">
 <head>
-  <meta charset="UTF-8">
+<meta charset="UTF-8">
+<script>(function(){try{var s=localStorage.getItem('sp_theme');var t;if(s==='system'){t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.dataset.mode='system'}else if(s==='light'||s==='dark'){t=s;document.documentElement.dataset.mode=s}else{t='dark';document.documentElement.dataset.mode='dark'}document.documentElement.dataset.theme=t;var st=localStorage.getItem('sp_style');if(st){document.documentElement.dataset.style=st}}catch(e){}})();</script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>管理后台 - SolarPanel</title>
   <link rel="icon" href="favicon.ico?v=20260919c" type="image/x-icon">
@@ -651,7 +652,7 @@
   </div>
 
   <!-- ============ 历史更新弹窗 ============ -->
-  <div class="modal" id="changelogHistoryModal">
+  <div class="modal" id="changelogHistoryModal" data-dismiss-bg>
     <div class="modal-box glass-strong" style="max-width:640px">
       <div class="modal-head">
         <h3>📜 全部更新历史</h3>
@@ -756,9 +757,13 @@
       </div>
       <form id="groupForm" autocomplete="off">
         <input type="hidden" id="g_id">
+        <input type="hidden" id="g_icon">
         <div class="form-item">
           <label>分组名称</label>
-          <input class="input" id="g_title" type="text" maxlength="50" required>
+          <div class="g-name-row">
+            <button class="g-icon-pick" type="button" id="gIconPick" title="选择分组图标"><span class="g-icon-placeholder">图标</span></button>
+            <input class="input" id="g_title" type="text" maxlength="50" required>
+          </div>
         </div>
         <div class="form-item">
           <label>描述（可选）</label>
@@ -769,6 +774,21 @@
           <button class="btn btn-primary" type="submit" id="groupSaveBtn">保存</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- ============ 分组图标选择弹窗 ============ -->
+  <div class="modal" id="groupIconModal">
+    <div class="modal-box glass-strong">
+      <div class="modal-head">
+        <h3>选择分组图标</h3>
+        <button class="btn btn-sm" data-close="groupIconModal">✕</button>
+      </div>
+      <input class="input gic-search" id="gicSearch" type="text" placeholder="搜索图标名称…" autocomplete="off">
+      <div id="gicBody"></div>
+      <div class="modal-foot">
+        <button class="btn" type="button" id="gicClear">移除图标</button>
+      </div>
     </div>
   </div>
 
@@ -834,7 +854,7 @@
   </div>
 
   <!-- ============ 未保存排序确认弹窗 ============ -->
-  <div class="modal" id="orderGuardModal">
+  <div class="modal" id="orderGuardModal" data-dismiss-bg>
     <div class="modal-box glass-strong" style="max-width:430px">
       <div class="modal-head">
         <h3>有未保存的排序更改</h3>
@@ -850,7 +870,7 @@
   </div>
 
   <!-- ============ 通用确认弹窗（替代浏览器原生 confirm：与主题风格同步 + 居中） ============ -->
-  <div class="modal" id="confirmModal">
+  <div class="modal" id="confirmModal" data-dismiss-bg>
     <div class="modal-box glass-strong" style="max-width:430px">
       <div class="modal-head">
         <h3 id="confirmTitle">确认操作</h3>
@@ -865,7 +885,7 @@
   </div>
 
   <script src="assets/js/qrcode.min.js"></script>
-  <script src="assets/js/api.js?v=20260919c"></script>
-  <script src="assets/js/admin.js?v=20260919c"></script>
+  <script src="assets/js/api.js?v=20260927a"></script>
+  <script src="assets/js/admin.js?v=20260927a"></script>
 </body>
 </html>
