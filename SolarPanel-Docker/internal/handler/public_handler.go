@@ -4,15 +4,20 @@ import (
 	"net/http"
 
 	"solarpanel/internal/auth"
+	"solarpanel/internal/config"
 	"solarpanel/internal/db"
 	"solarpanel/internal/model"
 
 	"github.com/gin-gonic/gin"
 )
 
-type PublicHandler struct{}
+type PublicHandler struct {
+	cfg *config.Config
+}
 
-func NewPublicHandler() *PublicHandler { return &PublicHandler{} }
+func NewPublicHandler(cfg *config.Config) *PublicHandler {
+	return &PublicHandler{cfg: cfg}
+}
 
 type GroupWithItems struct {
 	model.ItemGroup
@@ -92,9 +97,12 @@ func (h *PublicHandler) Public(c *gin.Context) {
 	for _, g := range groups {
 		gw := GroupWithItems{ItemGroup: g, Items: []model.Item{}}
 		for _, it := range items {
-			if it.GroupID == g.ID {
-				gw.Items = append(gw.Items, it)
+			if it.GroupID != g.ID {
+				continue
 			}
+			// v3.0：内联卡片图标，前端拿到数据即可直接渲染，无需再发图片请求
+			it.IconData = IconInlineData(h.cfg, it.IconType, it.IconValue, it.URL)
+			gw.Items = append(gw.Items, it)
 		}
 		grouped = append(grouped, gw)
 	}

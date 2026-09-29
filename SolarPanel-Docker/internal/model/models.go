@@ -44,6 +44,9 @@ type Item struct {
 	IconType    string    `gorm:"size:10;not null;default:'image'" json:"icon_type"`
 	IconValue   string    `gorm:"size:1000;not null;default:''" json:"icon_value"`
 	IconBG      string    `gorm:"size:20;not null;default:''" json:"icon_bg"`
+	// IconData 服务端内联的图标 data URI（v3.0 即时显示用）
+	// 非持久化字段，由 public 接口在返回时填充，前端拿到即可直接渲染
+	IconData    string    `gorm:"-" json:"icon_data,omitempty"`
 	OpenMethod  int       `gorm:"not null;default:2" json:"open_method"`
 	Sort        int       `gorm:"not null;default:0" json:"sort"`
 	UserID      uint      `gorm:"not null;default:1" json:"user_id"`

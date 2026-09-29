@@ -220,7 +220,7 @@ func main() {
 	uploadHandler := handler.NewUploadHandler(cfg)
 	galleryHandler := handler.NewGalleryHandler(cfg)
 	weatherHandler := handler.NewWeatherHandler(cfg)
-	publicHandler := &handler.PublicHandler{}
+	publicHandler := handler.NewPublicHandler(cfg)
 	newsHandler := &handler.NewsHandler{}
 	settingsHandler := &handler.SettingsHandler{}
 	groupsHandler := &handler.GroupsHandler{}
@@ -368,6 +368,14 @@ func main() {
 	// 同时注册 /frontend/uploads 和 /uploads 两个路径：
 	//   /frontend/uploads 是后端返回的标准路径
 	//   /uploads 是前端 assetUrl() 在 admin 等非主页页面转换后的路径（PHP 原版 Web 根即 frontend，故 /uploads 可直访）
+	// v3.0：给上传/缓存的静态图片加缓存头，二次访问直接命中浏览器缓存
+	r.Use(func(c *gin.Context) {
+		p := c.Request.URL.Path
+		if strings.HasPrefix(p, "/frontend/uploads/") || strings.HasPrefix(p, "/uploads/") {
+			c.Header("Cache-Control", "public, max-age=86400")
+		}
+		c.Next()
+	})
 	r.Static("/frontend/uploads", cfg.UploadDir)
 	r.Static("/uploads", cfg.UploadDir)
 

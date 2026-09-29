@@ -588,6 +588,7 @@ function __prefetchAllIcons() {
   const favicons = new Set();
   (state.groups || []).forEach(g => {
     (g.items || []).forEach(it => {
+      if (it.icon_data) return; // 服务端已内联，无需再预取
       if (it.icon_type === 'image' && it.icon_value) {
         images.add(assetUrl(it.icon_value));
       } else if (it.icon_type === 'favicon' && it.url) {
@@ -1062,7 +1063,7 @@ function buildCard(item, styleApp) {
     icon.classList.add('has-img');
   };
 
-  /** 挂载真实图片：命中内存缓存直接挂（零等待），否则先占位、加载完再原子替换 */
+  /** 挂载真实图片：命中内存缓存直接挂（零等待），否则加载完成后再显示（不做占位） */
   const paintImage = (src, noReferrer) => {
     if (iconDone) return;
     if (!src) { useTextIcon(); return; }
@@ -1071,19 +1072,29 @@ function buildCard(item, styleApp) {
     const hit = __imgCache.get(src);
     if (hit) { mountImage(hit); return; }
 
-    // 2) 已知加载失败 → 直接用文字图标，不再重复请求
+    // 2) 已知加载失败 → 用文字图标兜底
     if (__imgFailed.has(src)) { useTextIcon(); return; }
 
-    // 3) 首次加载 → 先画文字占位（立即可见），成功后原子替换，全程无空白
-    useTextIcon();
+    // 3) 首次加载：直接加载，就绪后显示（不使用文字/底色占位）
     __preloadImage(src, noReferrer).then(img => {
-      if (!img || iconDone) return;
+      if (iconDone) return;
+      if (!img) { useTextIcon(); return; }
       mountImage(img);
     });
   };
 
-  if (item.icon_type === 'image' && item.icon_value) {
-    // 本地上传图 / 自定义图标直链：同样先占位再替换
+  /** v3.0：渲染服务端内联的图标 data URI —— 内容已在页面数据里，零网络请求 */
+  const paintInlineIcon = (dataUri) => {
+    if (iconDone || !dataUri) return;
+    const img = new Image();
+    img.onload = () => { if (!iconDone) mountImage(img); };
+    img.src = dataUri; // data URI 无需网络，onload 在下一微任务即触发
+  };
+
+  if (item.icon_data) {
+    // 服务端已内联：直接显示，冷启动与切换分组均无等待
+    paintInlineIcon(item.icon_data);
+  } else if (item.icon_type === 'image' && item.icon_value) {
     paintImage(assetUrl(item.icon_value), false);
   } else if (item.icon_type === 'favicon' && item.url) {
     const host = __iconHost(item.url);
@@ -1095,14 +1106,15 @@ function buildCard(item, styleApp) {
       // 已确认所有候选源均失败：直接用文字图标，不再发无谓请求
       useTextIcon();
     } else {
-      // 首次渲染：先画文字占位（立即可见），后台探测成功后无缝替换
-      useTextIcon();
+      // 不支持内联时：后台探测成功后直接显示（不做占位）
       __prefetchIcon(item.url).then(src => {
-        if (src && !iconDone) paintImage(src, true);
+        if (iconDone) return;
+        if (src) paintImage(src, true);
+        else useTextIcon(); // 所有候选源均失败才用文字兜底
       });
     }
   } else {
-    useTextIcon();
+    useTextIcon(); // text 类型的正常渲染形态
   }
 
   // 文本

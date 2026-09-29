@@ -65,6 +65,42 @@ const API_BASE = '/api/';
 
 ---
 
+## 三之二、v3.0：服务端内联图标（彻底消除等待）
+
+前两版补丁都是「前端优化加载时机」，仍依赖网络请求，冷启动时首个分组
+依然要等图片下载。**v3.0 改为服务端内联，从根本上消除等待**：
+
+- 后端 `public` 接口在返回卡片数据时，把图标读出并转成 **base64 data URI**
+  （字段 `icon_data`），随 JSON 一起下发
+- 前端 `buildCard` 发现 `icon_data` 就直接渲染 —— **零图片请求**，
+  冷启动与切换分组都不再有等待
+- 同时移除文字/底色占位（按需求），图标未就绪时不再有任何中间态
+
+### 后端改动（Docker / Go）
+
+| 文件 | 说明 |
+|---|---|
+| `internal/handler/icon_inline.go` | 新增。图标内联与远程图标服务端缓存 |
+| `internal/model/models.go` | `Item` 增加 `IconData`（`gorm:"-"`，非持久化） |
+| `internal/handler/public_handler.go` | `PublicHandler` 持有 `cfg`，返回时填充 `icon_data` |
+| `main.go` | `NewPublicHandler(cfg)`；uploads 静态资源加 `Cache-Control` |
+
+内联规则：
+
+- **本地图标**（`/frontend/uploads/...`）→ 直接读盘内联
+- **远程图标**（http…）→ 查服务端缓存 `uploads/iconcache/<md5(url)>.<ext>`，
+  命中则内联；未命中则**后台异步拉取落盘**，本次不内联（下次刷新起即时）
+- **favicon 型** → 复用后端已有的 favicon 本地缓存
+- 单图标超过 96 KB 不内联，避免 public 响应体过大
+- 远程拉取有 SSRF 防护（`isPrivateHost`）与 8 秒超时、2 MB 大小限制
+
+### web 版（PHP）说明
+
+内联目前**只在 Docker / Go 版实现**。PHP 版 `public.php` 未改动，
+其 `icon_data` 恒为空，自动回退到前端预加载逻辑，功能不受影响。
+
+---
+
 ## 四、本次改动：应用图标延迟加载优化（仅前端）
 
 目标：切换分组时卡片图标不再延迟出现。未触碰分组图标（v2.1.16 新功能）任何代码。
