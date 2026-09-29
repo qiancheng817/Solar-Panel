@@ -165,8 +165,24 @@ docker pull ghcr.io/qiancheng817/solar-panel:2.1.16
    `'../backend/api/` 替换为 `'/api/'`
 6. **重新应用图标优化补丁**：参见本文档第四节，
    比对 `SolarPanel-web/frontend/assets/js/index.js` 与官方包的差异并还原
-7. 检查官方包是否给 `ItemGroup` 增加了新字段，若有则同步到
+7. **提升 Service Worker 缓存版本号**：把两版 `frontend/sw.js` 中的
+   `CACHE_NAME` 递增（如 `sp-cache-v19` → `sp-cache-v20`）。
+   **这一步不能省**：`sw.js` 对 JS/CSS 采用 stale-while-revalidate
+   （`return cached || fetchPromise`），会**优先返回旧缓存**，
+   不提升版本号的话镜像更新后首次打开仍是旧代码，刷新一次才生效，
+   极易被误判为「改动无效」。
+8. 检查官方包是否给 `ItemGroup` 增加了新字段，若有则同步到
    `SolarPanel-Docker/internal/model/models.go`
-8. 提交并打 `v*.*.*` 标签触发镜像构建
+9. 提交并打 `v*.*.*` 标签触发镜像构建
 
 建议每次升级前先 `git tag` 打一个基线快照，便于回滚对比。
+
+### 用户侧更新镜像后若仍显示旧界面
+
+按顺序排查：
+
+1. `docker compose pull && docker compose up -d`（确认拉到了新镜像）
+2. 浏览器**硬刷新**（Ctrl+Shift+R / Cmd+Shift+R）
+3. 仍不行则手动清站点数据：DevTools → Application → Service Workers →
+   Unregister，再 Clear storage
+4. 确认镜像构建时间：仓库 → Packages → solar-panel → 版本列表
