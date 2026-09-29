@@ -73,6 +73,9 @@ func (h *PublicHandler) Public(c *gin.Context) {
 
 	// 访客密码未验证：不返回任何分组/卡片数据，彻底隐藏前端信息
 	if guestRequired {
+		// 必须禁用缓存：否则访客通过验证后重新请求，会命中这份「未验证」的
+		// 缓存响应，导致锁屏反复出现、始终进不去。
+		c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 		Ok(c, gin.H{
 			"settings":       settings,
 			"groups":         []GroupWithItems{},
