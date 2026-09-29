@@ -612,11 +612,12 @@ function __prefetchAllIcons() {
     });
   };
 
-  // 等浏览器空闲再预取，避免与首屏资源争抢带宽
+  // 尽早预取未内联的图标（已内联的会被跳过，此处只剩真正需要的）。
+  // 超时设短一些，避免浏览器长时间不空闲导致延迟才发起。
   if (typeof requestIdleCallback === 'function') {
-    requestIdleCallback(run, { timeout: 1500 });
+    requestIdleCallback(run, { timeout: 200 });
   } else {
-    setTimeout(run, 200);
+    setTimeout(run, 50);
   }
 }
 

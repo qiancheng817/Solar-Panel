@@ -346,8 +346,10 @@ func WarmupIcons(cfg *config.Config) {
 			}
 			ensureRemoteIconAsync(cfg, v)
 			n++
-			if n%3 == 0 {
-				time.Sleep(300 * time.Millisecond) // 平滑节奏，避免并发过高
+			// 轻微限速即可：原先每 3 个 sleep 300ms，30 个图标要 3 秒才发起完，
+			// 容器重启后立刻访问会有部分图标尚未缓存而走第三方源产生延迟。
+			if n%10 == 0 {
+				time.Sleep(50 * time.Millisecond)
 			}
 		}
 		if n > 0 {
