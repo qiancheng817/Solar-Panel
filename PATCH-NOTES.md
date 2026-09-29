@@ -71,26 +71,37 @@ const API_BASE = '/api/';
 
 改动文件：`frontend/assets/js/index.js`（两版同步）
 
+> **注意**：本补丁覆盖 `image` / `favicon` / `text` **全部三种**图标类型。
+> 早期版本只改了 `favicon` 分支，导致图标类型为 `image` 的卡片仍然空白，
+> 已于第二次修订中全类型覆盖。
+
 ### 1. 新增图标缓存与预取模块（`buildCard` 之前）
 
-- `__iconUrlCache`：`host -> 已验证可用的图标 URL`
-- `__iconDeadHost`：记录所有候选源均失败的 host，避免重复发请求
-- `__prefetchIcon(url)`：串行探测候选源，成功后写入缓存
-- `__prefetchAllIcons()`：首屏后后台静默预取所有分组内 favicon 型卡片图标
+- `__imgCache`：**图片 URL -> 已加载完成的 HTMLImageElement**
+  （同一对象直接挂进 DOM，浏览器不再重新请求；这是消除延迟的关键）
+- `__imgFailed`：图片 URL -> 加载失败，避免重复请求
+- `__preloadImage(src)`：统一的图片预加载入口，成功时写入 `__imgCache`
+- `__iconUrlCache`：`host -> 已验证可用的 favicon URL`
+- `__iconDeadHost`：记录所有候选源均失败的 host
+- `__prefetchIcon(url)`：串行探测候选源（内部复用 `__preloadImage`）
+- `__prefetchAllIcons()`：首屏后经 `requestIdleCallback` 空闲预取
+  **全部三种类型**（image 直链 + favicon 探测），避免与首屏争带宽
 - `__groupSectionCache`：`groupId -> section`，导航栏模式下复用已渲染 DOM
 
 ### 2. `buildCard()` 图标分支重写
 
-原实现：每次新建 `<img>` 并从第一个源开始串行回退，
-`onload` 之前图标区是**空白**（文字图标只在全部失败后兜底）。
+原实现：每次新建 `<img>` 立即 `appendChild`，
+`onload` 之前图标位只显示 `.card .icon` 的默认底色（一片空色块）。
 
-新实现：
+新实现（`paintImage` + `mountImage` 统一处理 image 与 favicon）：
 
-- 命中 `__iconUrlCache` → 直接复用，浏览器缓存瞬时命中
-- host 在 `__iconDeadHost` → 直接用文字图标，不发请求
-- 首次 → **先画文字图标占位（立即可见）**，后台探测成功后原子替换
+1. 命中 `__imgCache` → **直接挂载已加载好的 Image 对象，零等待**
+2. URL 在 `__imgFailed` / host 在 `__iconDeadHost` → 直接用文字图标，不发请求
+3. 首次 → **先画文字图标占位（立即可见）**，加载完成后原子替换
 
-图片一律先在内存中 `new Image()` 加载完成再替换占位，全程无空白帧。
+`mountImage()` 会清理文字占位残留：移除 `icon-grid-cn` / `icon-wrap-en`
+布局类，并清空内联 `background`（内联优先级高于 `.has-img`，不清会导致
+图片显示在彩色底色上）。
 
 ### 3. `renderNavbarCardsOnly()` 复用分组 DOM
 

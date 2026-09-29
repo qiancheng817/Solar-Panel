@@ -510,23 +510,42 @@ function renderSearch() {
 }
 
 /* ============================================================
-   应用图标即时加载补丁（基于 v2.1.16，仅优化卡片图标加载时机）
+   应用图标即时加载补丁（基于 v2.1.16）
    ------------------------------------------------------------
-   原实现每次切换分组都销毁重建卡片 DOM，favicon 型卡片重新发起
-   第三方图标服务请求（串行回退 4 个源），onload 之前图标区是空白。
-   本补丁不改变任何既有功能，只做三件事：
-     1) __iconUrlCache  缓存已验证可用的图标 URL，切换分组直接复用
-     2) __iconDeadHost  记录已确认全部失败的 host，不再重复请求
-     3) 卡片先渲染文字图标占位，图片就绪后替换 —— 杜绝空白等待
-     4) 首屏后后台预取所有分组图标，后续切换零网络等待
+   问题：切换分组时分组 DOM 被销毁重建，卡片图标重新发起网络请求；
+        图片 onload 之前图标位只显示默认底色（一片空色块）。
+   做法：不改变任何既有功能，只调整图标的「加载时机」——
+     1) __imgCache      图片 URL -> 已加载完成的 HTMLImageElement
+                        （同一对象直接挂进 DOM，浏览器不再重新请求）
+     2) __iconUrlCache  host -> 已验证可用的 favicon URL
+     3) __iconDeadHost  host -> 所有候选源均失败，不再重复探测
+     4) 卡片先渲染文字图标占位，图片就绪后原子替换 —— 全程无空白
+     5) 首屏后空闲时预取所有分组图标，后续切换零网络等待
+   覆盖全部三种图标类型：image / favicon / text。
    ============================================================ */
-const __iconUrlCache = new Map();   // host -> 已成功加载的图标 URL
-const __iconDeadHost = new Set();   // host -> 所有候选源均失败
-const __iconPrefetching = new Set(); // 正在/已预取的 URL，避免重复
+const __iconUrlCache = new Map();    // host -> 可用的 favicon URL
+const __iconDeadHost = new Set();    // host -> 所有候选源均失败
+const __iconPrefetching = new Set(); // 已排入预取的条目（带类型前缀）
+const __imgCache = new Map();        // 图片 URL -> 已加载完成的 HTMLImageElement
+const __imgFailed = new Set();       // 图片 URL -> 加载失败
 
 /** 取 URL 的 hostname，失败返回空串 */
 function __iconHost(url) {
   try { return new URL(url).hostname || ''; } catch (e) { return ''; }
+}
+
+/** 预加载一张图片并缓存已解码的 HTMLImageElement；失败 resolve null */
+function __preloadImage(src, noReferrer) {
+  if (!src) return Promise.resolve(null);
+  if (__imgCache.has(src)) return Promise.resolve(__imgCache.get(src));
+  if (__imgFailed.has(src)) return Promise.resolve(null);
+  return new Promise(resolve => {
+    const img = new Image();
+    if (noReferrer) img.referrerPolicy = 'no-referrer';
+    img.onload = () => { __imgCache.set(src, img); resolve(img); };
+    img.onerror = () => { __imgFailed.add(src); resolve(null); };
+    img.src = src;
+  });
 }
 
 /** 探测并缓存某站点图标；resolve 可用的 URL，全部失败 resolve '' */
@@ -548,29 +567,56 @@ function __prefetchIcon(rawUrl) {
         return;
       }
       const src = sources[si];
-      const probe = new Image();
-      probe.referrerPolicy = 'no-referrer';
-      probe.onload = () => { __iconUrlCache.set(host, src); resolve(src); };
-      probe.onerror = () => { si += 1; tryNext(); };
-      probe.src = src;
+      // 复用统一的图片预加载，成功后图片本身也已进入 __imgCache
+      __preloadImage(src, true).then(img => {
+        if (img) {
+          __iconUrlCache.set(host, src);
+          resolve(src);
+        } else {
+          si += 1;
+          tryNext();
+        }
+      });
     };
     tryNext();
   });
 }
 
-/** 后台静默预取所有分组内 favicon 型卡片的图标 */
+/** 后台静默预取所有分组的卡片图标（image 直链 + favicon 探测） */
 function __prefetchAllIcons() {
-  const urls = new Set();
+  const images = new Set();
+  const favicons = new Set();
   (state.groups || []).forEach(g => {
     (g.items || []).forEach(it => {
-      if (it.icon_type === 'favicon' && it.url) urls.add(it.url);
+      if (it.icon_type === 'image' && it.icon_value) {
+        images.add(assetUrl(it.icon_value));
+      } else if (it.icon_type === 'favicon' && it.url) {
+        favicons.add(it.url);
+      }
     });
   });
-  urls.forEach(u => {
-    if (__iconPrefetching.has(u)) return;
-    __iconPrefetching.add(u);
-    __prefetchIcon(u);
-  });
+
+  const run = () => {
+    images.forEach(src => {
+      const key = 'img:' + src;
+      if (__iconPrefetching.has(key)) return;
+      __iconPrefetching.add(key);
+      __preloadImage(src, false);
+    });
+    favicons.forEach(u => {
+      const key = 'fav:' + u;
+      if (__iconPrefetching.has(key)) return;
+      __iconPrefetching.add(key);
+      __prefetchIcon(u);
+    });
+  };
+
+  // 等浏览器空闲再预取，避免与首屏资源争抢带宽
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(run, { timeout: 1500 });
+  } else {
+    setTimeout(run, 200);
+  }
 }
 
 /** 导航栏模式下已渲染的分组 DOM 缓存：groupId -> section
@@ -1006,29 +1052,39 @@ function buildCard(item, styleApp) {
     renderTextIcon(icon, smartIconText(raw), 21);
   };
 
-  /** 真实图片：先在内存中加载完成，再原子替换文字占位，全程无空白 */
+  /** 把已就绪的图片挂到图标位，并清理文字占位残留的样式/类 */
+  const mountImage = (img) => {
+    iconDone = true;
+    icon.classList.remove('icon-grid-cn', 'icon-wrap-en');
+    icon.style.background = ''; // 清掉文字占位的内联底色（内联优先级高于 .has-img）
+    icon.innerHTML = '';
+    icon.appendChild(img);
+    icon.classList.add('has-img');
+  };
+
+  /** 挂载真实图片：命中内存缓存直接挂（零等待），否则先占位、加载完再原子替换 */
   const paintImage = (src, noReferrer) => {
     if (iconDone) return;
-    const img = new Image();
-    if (noReferrer) img.referrerPolicy = 'no-referrer';
-    img.onload = () => {
-      if (iconDone) return;
-      iconDone = true;
-      icon.innerHTML = '';
-      icon.appendChild(img);
-      icon.classList.add('has-img');
-    };
-    img.onerror = () => { if (!iconDone) { textPainted = false; useTextIcon(); } };
-    img.src = src;
+    if (!src) { useTextIcon(); return; }
+
+    // 1) 图片已在内存中加载完成 → 复用同一元素，瞬间显示
+    const hit = __imgCache.get(src);
+    if (hit) { mountImage(hit); return; }
+
+    // 2) 已知加载失败 → 直接用文字图标，不再重复请求
+    if (__imgFailed.has(src)) { useTextIcon(); return; }
+
+    // 3) 首次加载 → 先画文字占位（立即可见），成功后原子替换，全程无空白
+    useTextIcon();
+    __preloadImage(src, noReferrer).then(img => {
+      if (!img || iconDone) return;
+      mountImage(img);
+    });
   };
 
   if (item.icon_type === 'image' && item.icon_value) {
-    const img = document.createElement('img');
-    img.src = assetUrl(item.icon_value);
-    img.alt = '';
-    img.onerror = useTextIcon;
-    img.onload = () => { iconDone = true; icon.classList.add('has-img'); };
-    icon.appendChild(img);
+    // 本地上传图 / 自定义图标直链：同样先占位再替换
+    paintImage(assetUrl(item.icon_value), false);
   } else if (item.icon_type === 'favicon' && item.url) {
     const host = __iconHost(item.url);
     const cached = host ? __iconUrlCache.get(host) : '';
