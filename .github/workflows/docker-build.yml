@@ -69,3 +69,33 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/solar-panel:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # 冒烟测试：真正把容器跑起来请求一次接口。
+      # 编译通过 ≠ 运行正常（曾因函数自我递归导致栈溢出、请求 panic 返回 502）。
+      - name: Smoke test
+        run: |
+          IMG="ghcr.io/${{ github.repository_owner }}/solar-panel:${{ steps.tag.outputs.value }}"
+          docker run -d --name sp-smoke -p 18080:18080 "$IMG"
+          code=""
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /tmp/resp.json -w '%{http_code}' http://localhost:18080/api/public.php || true)
+            if [ "$code" = "200" ]; then break; fi
+            sleep 2
+          done
+          echo "public.php -> HTTP $code"
+          head -c 200 /tmp/resp.json 2>/dev/null; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::public.php 未返回 200，容器日志："
+            docker logs sp-smoke
+            docker rm -f sp-smoke || true
+            exit 1
+          fi
+          if docker logs sp-smoke 2>&1 | grep -q "panic:"; then
+            echo "::error::容器日志中发现 panic"
+            docker logs sp-smoke | grep -A 20 "panic:"
+            docker rm -f sp-smoke || true
+            exit 1
+          fi
+          echo "冒烟测试通过"
+          docker logs sp-smoke | tail -15
+          docker rm -f sp-smoke

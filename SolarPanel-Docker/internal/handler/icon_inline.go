@@ -87,7 +87,7 @@ func cachedDataURI(p string) string {
 			return e.uri
 		}
 	}
-	uri := cachedDataURI(p)
+	uri := readImageFile(p) // 注意：这里必须调用底层实现，不可写成 cachedDataURI 自身
 	if uri != "" {
 		iconURICache.Store(p, &iconURIEntry{
 			uri:     uri,
