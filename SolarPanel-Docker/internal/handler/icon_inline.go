@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"io"
 	"log"
-	"mime"
 	"net/http"
 	"net/url"
 	"os"
