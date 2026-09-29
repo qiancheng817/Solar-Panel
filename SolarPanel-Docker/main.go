@@ -399,6 +399,9 @@ func main() {
 		c.JSON(http.StatusNotFound, gin.H{"code": 1, "data": nil, "msg": "not found: " + path})
 	})
 
+	// 后台预热远程图标缓存：启动后把历史图标提前抓好，之后每次访问都是内联即时显示
+	handler.WarmupIcons(cfg)
+
 	// ===== 启动 =====
 	log.Println("==============================================")
 	log.Println(" SolarPanel (Go rewrite) 已启动")

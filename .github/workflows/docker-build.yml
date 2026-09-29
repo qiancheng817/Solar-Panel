@@ -9,7 +9,7 @@ on:
       image_tag:
         description: '镜像标签'
         required: false
-        default: 'v3.0'
+        default: 'v2.1.16'
       platforms:
         description: '构建平台（默认 amd64，飞牛/x86 用这个即可）'
         required: false
@@ -34,7 +34,7 @@ jobs:
           elif [ "${{ github.ref_type }}" = "tag" ]; then
             echo "value=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           else
-            echo "value=v3.0" >> "$GITHUB_OUTPUT"
+            echo "value=v2.1.16" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Resolve platforms

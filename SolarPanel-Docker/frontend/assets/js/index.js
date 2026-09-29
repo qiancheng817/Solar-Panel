@@ -620,6 +620,55 @@ function __prefetchAllIcons() {
   }
 }
 
+/* ------------------------------------------------------------
+   图标补齐：首屏渲染后若仍有卡片图标未能内联显示，
+   等服务端把远程图标缓存好，静默重取一次数据并只替换图标位，
+   不重建分组 DOM，避免闪烁。
+   ------------------------------------------------------------ */
+let __iconBackfillTimer = null;
+
+function __scheduleIconBackfill() {
+  if (__iconBackfillTimer) return;
+  __iconBackfillTimer = setTimeout(async () => {
+    __iconBackfillTimer = null;
+    const pending = Array.prototype.slice
+      .call(document.querySelectorAll('#groupsWrap .card'))
+      .filter(a => !a.querySelector('.icon.has-img'));
+    if (!pending.length) return;
+
+    let data;
+    try {
+      data = await API.get(API_BASE + 'public.php');
+    } catch (e) {
+      return; // 静默失败，不打扰用户
+    }
+    const inlineMap = new Map();
+    (data.groups || []).forEach(g => {
+      (g.items || []).forEach(it => {
+        if (it.icon_data) inlineMap.set(String(it.id), it.icon_data);
+      });
+    });
+    if (!inlineMap.size) return;
+
+    pending.forEach(card => {
+      const uri = inlineMap.get(String(card.dataset.id));
+      if (!uri) return;
+      const icon = card.querySelector('.icon');
+      if (!icon || icon.classList.contains('has-img')) return;
+      const img = new Image();
+      img.onload = () => {
+        if (icon.classList.contains('has-img')) return;
+        icon.classList.remove('icon-grid-cn', 'icon-wrap-en');
+        icon.style.background = '';
+        icon.innerHTML = '';
+        icon.appendChild(img);
+        icon.classList.add('has-img');
+      };
+      img.src = uri;
+    });
+  }, 3500);
+}
+
 /** 导航栏模式下已渲染的分组 DOM 缓存：groupId -> section
  *  切换分组时直接复用，避免重建卡片导致图标重新加载。
  *  仅在 renderGroups()（数据变更）时整体失效。 */
@@ -739,6 +788,7 @@ function renderGroups() {
     renderGroupsNavbar();
     // 后台静默预取所有分组图标，后续切换分组时直接命中缓存
     __prefetchAllIcons();
+    __scheduleIconBackfill();
     return;
   }
 
@@ -765,6 +815,7 @@ function renderGroups() {
 
   // 后台静默预取所有分组图标
   __prefetchAllIcons();
+  __scheduleIconBackfill();
 }
 
 /* ---------- 左侧悬浮目录条（导航视图=分组目录 / 新闻视图=平台目录，共用同一对元素） ---------- */
@@ -990,6 +1041,9 @@ function renderNavbarCardsOnly() {
 
   state.groupIntroDone = true;
   state.cardsIntroDone = true;
+
+  // 本次渲染若仍有未内联的图标，稍后静默补齐
+  __scheduleIconBackfill();
 }
 
 /** 新闻视图：平台名称目录（色点取平台主题色） */
@@ -1088,7 +1142,22 @@ function buildCard(item, styleApp) {
     if (iconDone || !dataUri) return;
     const img = new Image();
     img.onload = () => { if (!iconDone) mountImage(img); };
-    img.src = dataUri; // data URI 无需网络，onload 在下一微任务即触发
+    // 内联数据异常时逐级回退：原始地址 → 第三方探测 → 文字，避免残留空块
+    img.onerror = () => {
+      if (iconDone) return;
+      if (item.icon_type === 'favicon' && item.url) {
+        __prefetchIcon(item.url).then(src => {
+          if (iconDone) return;
+          if (src) paintImage(src, true);
+          else useTextIcon();
+        });
+      } else if (item.icon_value) {
+        paintImage(assetUrl(item.icon_value), false);
+      } else {
+        useTextIcon();
+      }
+    };
+    img.src = dataUri;
   };
 
   if (item.icon_data) {

@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"solarpanel/internal/config"
+	"solarpanel/internal/db"
+	"solarpanel/internal/model"
 )
 
 /*
@@ -28,14 +30,20 @@ import (
        未命中则后台异步拉取落盘，本次请求不内联（下一次刷新起即时显示）
      - favicon 型卡片：复用后端已有的 favicon 本地缓存
 
-限制：单个图标超过 iconInlineMaxBytes 不内联，避免 public 响应体过大。
+拉取健壮性（v3.0 修订）：
+     - 携带浏览器 UA 与来源 Referer，避免被第三方站点拒绝
+     - 以「实际内容」判定类型（魔数），不信任响应头，防止把 HTML 错误页当图片缓存
+     - 落盘前校验确为图片，校验失败不落盘并允许重试
+     - 启动后后台预热，把历史图标提前缓存好
 */
 
 const (
-	iconInlineMaxBytes = 96 * 1024
+	iconInlineMaxBytes = 256 * 1024
 	iconCacheDirName   = "iconcache"
-	iconFetchTimeout   = 8 * time.Second
-	iconFetchMaxBytes  = 2 * 1024 * 1024
+	iconFetchTimeout   = 10 * time.Second
+	iconFetchMaxBytes  = 4 * 1024 * 1024
+	iconFetchUA        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+		"(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 )
 
 // iconFetchGuard 保证同一 URL 在进程内不会被重复触发异步拉取
@@ -49,6 +57,7 @@ var iconCTExt = map[string]string{
 	"image/jpg":                ".jpg",
 	"image/gif":                ".gif",
 	"image/webp":               ".webp",
+	"image/bmp":                ".bmp",
 	"image/x-icon":             ".ico",
 	"image/vnd.microsoft.icon": ".ico",
 	"image/svg+xml":            ".svg",
@@ -56,6 +65,31 @@ var iconCTExt = map[string]string{
 
 func iconCacheDir(cfg *config.Config) string {
 	return filepath.Join(cfg.UploadDir, iconCacheDirName)
+}
+
+// looksLikeSVG SVG 是文本，无法用魔数识别，做前缀判断
+func looksLikeSVG(b []byte) bool {
+	n := len(b)
+	if n > 512 {
+		n = 512
+	}
+	s := strings.ToLower(strings.TrimSpace(string(b[:n])))
+	return strings.HasPrefix(s, "<?xml") || strings.HasPrefix(s, "<svg")
+}
+
+// detectImageExt 依据实际内容判定图片扩展名，非图片返回空
+func detectImageExt(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	if looksLikeSVG(b) {
+		return ".svg"
+	}
+	ct := http.DetectContentType(b)
+	if i := strings.Index(ct, ";"); i >= 0 {
+		ct = strings.TrimSpace(ct[:i])
+	}
+	return iconCTExt[ct]
 }
 
 // resolveIconAbsPath 把前端使用的图标路径映射为服务器磁盘绝对路径
@@ -94,8 +128,8 @@ func iconCachePathFor(cfg *config.Config, rawURL string) string {
 	return ""
 }
 
-// dataURIFromPath 读取图片文件并转成 data URI；超限/失败返回空
-func dataURIFromPath(p string) string {
+// readImageFile 读取图片文件；返回 data URI，失败/非图片返回空
+func readImageFile(p string) string {
 	st, err := os.Stat(p)
 	if err != nil || st.Size() == 0 || st.Size() > iconInlineMaxBytes {
 		return ""
@@ -109,12 +143,10 @@ func dataURIFromPath(p string) string {
 	if _, err := io.ReadFull(f, buf); err != nil {
 		return ""
 	}
-	ct := mime.TypeByExtension(strings.ToLower(filepath.Ext(p)))
+	// 以实际内容判定类型；非图片直接判定为坏文件（例如缓存了 HTML 错误页）
+	ct := detectImageExt(buf)
 	if ct == "" {
-		ct = http.DetectContentType(buf)
-	}
-	if ct == "" || !strings.HasPrefix(ct, "image/") {
-		ct = "image/png"
+		return ""
 	}
 	return "data:" + ct + ";base64," + base64.StdEncoding.EncodeToString(buf)
 }
@@ -143,8 +175,7 @@ func ensureRemoteIconAsync(cfg *config.Config, rawURL string) {
 		return
 	}
 	go func() {
-		ok := fetchAndCacheIcon(cfg, rawURL)
-		if !ok {
+		if !fetchAndCacheIcon(cfg, rawURL) {
 			// 失败则释放，允许后续请求重试
 			iconFetchGuard.Delete(rawURL)
 		}
@@ -152,8 +183,19 @@ func ensureRemoteIconAsync(cfg *config.Config, rawURL string) {
 }
 
 func fetchAndCacheIcon(cfg *config.Config, rawURL string) bool {
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return false
+	}
+	// 很多站点/CDN 会拒绝默认的 Go UA，带上浏览器标识与来源
+	req.Header.Set("User-Agent", iconFetchUA)
+	req.Header.Set("Accept", "image/avif,image/webp,image/png,image/svg+xml,image/*,*/*;q=0.8")
+	if u, err := url.Parse(rawURL); err == nil {
+		req.Header.Set("Referer", u.Scheme+"://"+u.Host+"/")
+	}
+
 	client := &http.Client{Timeout: iconFetchTimeout}
-	resp, err := client.Get(rawURL)
+	resp, err := client.Do(req)
 	if err != nil {
 		return false
 	}
@@ -165,31 +207,14 @@ func fetchAndCacheIcon(cfg *config.Config, rawURL string) bool {
 	if err != nil || len(body) == 0 || len(body) > iconFetchMaxBytes {
 		return false
 	}
-	ct := strings.ToLower(resp.Header.Get("Content-Type"))
-	if i := strings.Index(ct, ";"); i >= 0 {
-		ct = strings.TrimSpace(ct[:i])
-	}
-	ext := iconCTExt[ct]
+
+	// 以实际内容判定类型；不是图片就不落盘（防止把 HTML 错误页缓存成 .png）
+	ext := detectImageExt(body)
 	if ext == "" {
-		if e := strings.ToLower(filepath.Ext(hostOfURL(rawURL))); e != "" {
-			ext = e
-		}
+		return false
 	}
-	if ext == "" {
-		ext = iconCTExt[http.DetectContentType(body)]
-	}
-	if ext == "" {
-		ext = ".png"
-	}
-	valid := false
-	for _, e := range iconExtCandidates {
-		if e == ext {
-			valid = true
-			break
-		}
-	}
-	if !valid {
-		ext = ".png"
+	if ext == ".bmp" {
+		return false // bmp 体积大，不适合内联
 	}
 
 	dir := iconCacheDir(cfg)
@@ -197,8 +222,14 @@ func fetchAndCacheIcon(cfg *config.Config, rawURL string) bool {
 		log.Println("[icon] 缓存目录不可写:", err)
 		return false
 	}
-	p := filepath.Join(dir, md5Hex(rawURL)+ext)
-	if err := os.WriteFile(p, body, 0644); err != nil {
+
+	// 先清掉同 URL 可能存在的旧扩展名文件，避免多个副本
+	h := md5Hex(rawURL)
+	for _, e := range iconExtCandidates {
+		_ = os.Remove(filepath.Join(dir, h+e))
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, h+ext), body, 0644); err != nil {
 		return false
 	}
 	return true
@@ -216,7 +247,7 @@ func IconInlineData(cfg *config.Config, iconType, iconValue, itemURL string) str
 
 	// 1) 本地图标：直接内联
 	if p := resolveIconAbsPath(cfg, v); p != "" {
-		if d := dataURIFromPath(p); d != "" {
+		if d := readImageFile(p); d != "" {
 			return d
 		}
 	}
@@ -224,9 +255,12 @@ func IconInlineData(cfg *config.Config, iconType, iconValue, itemURL string) str
 	// 2) 远程图标：命中服务端缓存则内联，否则后台拉取（下次生效）
 	if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
 		if p := iconCachePathFor(cfg, v); p != "" {
-			if d := dataURIFromPath(p); d != "" {
+			if d := readImageFile(p); d != "" {
 				return d
 			}
+			// 缓存内容损坏（非图片）→ 删除并允许重新拉取
+			_ = os.Remove(p)
+			iconFetchGuard.Delete(v)
 		}
 		ensureRemoteIconAsync(cfg, v)
 		return ""
@@ -237,7 +271,7 @@ func IconInlineData(cfg *config.Config, iconType, iconValue, itemURL string) str
 		if host := hostOfURL(itemURL); host != "" {
 			if cached := checkFaviconCache(cfg, host); cached != "" {
 				if p := resolveIconAbsPath(cfg, cached); p != "" {
-					if d := dataURIFromPath(p); d != "" {
+					if d := readImageFile(p); d != "" {
 						return d
 					}
 				}
@@ -245,4 +279,41 @@ func IconInlineData(cfg *config.Config, iconType, iconValue, itemURL string) str
 		}
 	}
 	return ""
+}
+
+// WarmupIcons 启动后在后台把所有远程图标缓存到本地，供后续请求内联。
+// 仅对远程直链生效；本地图标无需预热。
+func WarmupIcons(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Println("[icon] 预热异常:", r)
+			}
+		}()
+		var items []model.Item
+		if err := db.DB.Where("icon_type = ?", "image").Find(&items).Error; err != nil {
+			return
+		}
+		n := 0
+		for _, it := range items {
+			v := strings.TrimSpace(it.IconValue)
+			if !strings.HasPrefix(v, "http://") && !strings.HasPrefix(v, "https://") {
+				continue
+			}
+			if iconCachePathFor(cfg, v) != "" {
+				continue
+			}
+			ensureRemoteIconAsync(cfg, v)
+			n++
+			if n%3 == 0 {
+				time.Sleep(300 * time.Millisecond) // 平滑节奏，避免并发过高
+			}
+		}
+		if n > 0 {
+			log.Printf("[icon] 已发起 %d 个远程图标的后台缓存", n)
+		}
+	}()
 }
